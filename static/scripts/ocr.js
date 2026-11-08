@@ -1,4 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
+  // Elements
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('image-upload-input');
   const imageForm = document.getElementById('image-search-form');
@@ -18,41 +19,27 @@ document.addEventListener('DOMContentLoaded', () => {
   const selectedDishCountry = document.getElementById('selected-dish-country');
   const selectedDishImage = document.getElementById('selected-dish-image');
   const ocrLoading = document.getElementById('ocr-loading');
+  const ocrNote = document.getElementById('ocr-loading-note');
   const picker = document.getElementById('dish-picker-overlay');
   const pickerList = document.getElementById('dish-picker-list');
   const pickerClose = document.getElementById('dish-picker-close');
   const selectDishPrompt = document.getElementById('select-dish-prompt');
   const selectDishPromptCount = document.getElementById('select-dish-prompt-count');
+
+  // State
   let activeScanController = null;
   let detectedMatches = [];
-
-  // Card under the photo that reopens the picker when several dishes
-  // were found but the user closed the picker without choosing one.
-  function updateSelectDishPrompt() {
-    const pickerOpen = !picker.classList.contains('hidden');
-    const needsChoice = detectedMatches.length >= 2 && !hiddenDishInput.value;
-
-    if (needsChoice && !pickerOpen) {
-      selectDishPromptCount.textContent =
-        `${detectedMatches.length} dishes found · Click to choose`;
-      selectDishPrompt.style.display = 'flex';
-    } else {
-      selectDishPrompt.style.display = 'none';
-    }
-  }
-
-  function closeDishPicker() {
-    picker.classList.add('hidden');
-    // Closed (X, Escape, outside click) without choosing a dish:
-    // keep the origin empty until a dish is selected.
-    if (!hiddenDishInput.value) setOrigin('');
-    updateSelectDishPrompt();
-  }
-
-  // The origin box isn't a dropdown anymore. It just shows the country of
-  // the dish found in the photo, or a placeholder while there isn't one.
   let isScanning = false;
+  let ocrTimer = null;
 
+  // Loading tips
+  const OCR_NOTES = [
+    'Note: Use a clear, readable photo.',
+    'Note: Results depend on image quality and language.',
+    'Note: Longer menus take more time.',
+  ];
+
+  // Show the country, or a placeholder
   function updateOriginDisplay() {
     const option = originSelect.options[originSelect.selectedIndex];
     const hasCountry = Boolean(originSelect.value && option);
@@ -77,15 +64,33 @@ document.addEventListener('DOMContentLoaded', () => {
     updateOriginDisplay();
   }
 
-  // Rotating tips shown under the loading bar
-  const ocrNote = document.getElementById('ocr-loading-note');
-  const OCR_NOTES = [
-    'Note: Use a clear, readable photo.',
-    'Note: Results depend on image quality and language.',
-    'Note: Longer menus take more time.',
-  ];
-  let ocrTimer = null;
+  // Show "choose a dish" card if picker was closed without picking
+  function updateSelectDishPrompt() {
+    const pickerOpen = !picker.classList.contains('hidden');
+    const needsChoice = detectedMatches.length >= 2 && !hiddenDishInput.value;
 
+    if (needsChoice && !pickerOpen) {
+      selectDishPromptCount.textContent =
+        `${detectedMatches.length} dishes found · Click to choose`;
+      selectDishPrompt.style.display = 'flex';
+    } else {
+      selectDishPrompt.style.display = 'none';
+    }
+  }
+
+  function closeDishPicker() {
+    picker.classList.add('hidden');
+    // No dish picked, so no country yet
+    if (!hiddenDishInput.value) setOrigin('');
+    updateSelectDishPrompt();
+  }
+
+  function stopOcrTimer() {
+    if (ocrTimer) clearInterval(ocrTimer);
+    ocrTimer = null;
+  }
+
+  // Swap tips every 4s
   function startOcrTimer() {
     stopOcrTimer();
     let noteIndex = 0;
@@ -93,7 +98,6 @@ document.addEventListener('DOMContentLoaded', () => {
       ocrNote.textContent = OCR_NOTES[0];
       ocrNote.classList.remove('is-fading');
     }
-    // Change the note every 4 seconds
     ocrTimer = setInterval(() => {
       if (ocrNote) {
         ocrNote.classList.add('is-fading');
@@ -104,11 +108,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 250);
       }
     }, 4000);
-  }
-
-  function stopOcrTimer() {
-    if (ocrTimer) clearInterval(ocrTimer);
-    ocrTimer = null;
   }
 
   function setOcrLoading(isLoading) {
@@ -122,6 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
     imageForm.classList.toggle('is-ocr-loading', isLoading);
   }
 
+  // Fill the dish card
   function selectDish(match, showCard = true, canChange = true) {
     setOrigin(match.country);
     hiddenDishInput.value = match.title;
@@ -151,6 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
     closeDishPicker();
   }
 
+  // One match = auto pick, more = show list
   function showDishPicker(matches) {
     detectedMatches = matches;
     if (matches.length === 1) {
@@ -196,6 +197,7 @@ document.addEventListener('DOMContentLoaded', () => {
         imgEl.style.display = 'none';
       }
 
+      // Hide broken images
       imgEl.addEventListener('error', () => {
         imgEl.style.display = 'none';
       });
@@ -213,11 +215,13 @@ document.addEventListener('DOMContentLoaded', () => {
     updateSelectDishPrompt();
   }
 
+  // Send photo to the server
   async function extractImageInfo(file) {
     hiddenDishInput.value = '';
     detectedMatches = [];
     closeDishPicker();
     selectedDishCard.style.display = 'none';
+    // Cancel the old scan
     if (activeScanController) activeScanController.abort();
     const scanController = new AbortController();
     activeScanController = scanController;
@@ -233,26 +237,25 @@ document.addEventListener('DOMContentLoaded', () => {
         signal: scanController.signal,
       });
       const data = await response.json();
+      // Ignore old results
       if (activeScanController !== scanController) return;
 
       if (data.matches && data.matches.length) {
-        // The origin stays empty until the user picks a dish
-        // (a single match is picked automatically in showDishPicker).
         showDishPicker(data.matches);
       } else if (data.error === 'unsupported_script') {
-        // Khmer, Burmese or unreadable text (see ocr.py)
+        // Khmer, Burmese or blurry
         showErrorModal('Language Not Supported or Blurry Image', data.message);
       } else if (data.error === 'too_large') {
-        // Bigger than the upload limit in app.py (MAX_CONTENT_LENGTH)
+        // Over the upload limit
         showErrorModal('Image Too Large', data.message);
       } else if (data.error === 'no_text') {
-        // No text found at all in the photo (see app.py)
+        // Nothing to read
         showErrorModal('No Text Detected', data.message);
       } else if (!data.raw_text && data.message) {
-        // Something went wrong before any text was read (for example the
-        // OCR service on Hugging Face didn't answer). Show the real reason.
+        // Server error, show why
         showErrorModal('Scanning Error', data.message);
       } else {
+        // Text found, no dish
         showErrorModal(
           "We Can't Find Your Dish",
           "We couldn't find the dish in the recipe database. Try another dish or use a clearer photo."
@@ -270,9 +273,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // Show preview, then scan
+  // Same limit as MAX_CONTENT_LENGTH in app.py (16 MB)
+  const MAX_UPLOAD_BYTES = 16 * 1024 * 1024;
+
   function displayPreview(file) {
     if (!file.type.startsWith('image/')) {
       showErrorModal('Unsupported File', 'Please upload an image file.');
+      return;
+    }
+    // Check the size here: on Render the server cuts off a too-big upload,
+    // so the browser never receives the server's "too large" answer
+    if (file.size > MAX_UPLOAD_BYTES) {
+      fileInput.value = '';
+      showErrorModal('Image Too Large', 'This photo is too large. Please upload an image under 16 MB.');
       return;
     }
     setOrigin('');
@@ -287,7 +301,7 @@ document.addEventListener('DOMContentLoaded', () => {
     extractImageInfo(file);
   }
 
-  // Prevent fileInput from opening when clicking removeBtn or selectedDishCard
+  // Open file picker, except on inner buttons
   dropzone.addEventListener('click', (event) => {
     if (
       event.target.closest('#remove-img-btn') ||
@@ -303,6 +317,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fileInput.files[0]) displayPreview(fileInput.files[0]);
   });
 
+  // Drag and drop
   ['dragenter', 'dragover'].forEach((eventName) => dropzone.addEventListener(eventName, (event) => {
     event.preventDefault();
     dropzone.classList.add('dragover');
@@ -321,13 +336,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // Close picker
   pickerClose.addEventListener('click', closeDishPicker);
 
   picker.addEventListener('click', (event) => {
     if (event.target === picker) closeDishPicker();
   });
 
-  // Stop bubbling to dropzone so file upload does not open
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !picker.classList.contains('hidden')) {
+      closeDishPicker();
+    }
+  });
+
+  // Reopen picker
   selectedDishCard.addEventListener('click', (event) => {
     event.stopPropagation();
     if (detectedMatches.length >= 2) {
@@ -335,7 +357,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Reopen the picker from the "Select dish from the image" card
   selectDishPrompt.addEventListener('click', (event) => {
     event.stopPropagation();
     if (detectedMatches.length >= 2) {
@@ -343,13 +364,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Escape closes the picker (the prompt card then appears)
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !picker.classList.contains('hidden')) {
-      closeDishPicker();
-    }
-  });
-
+  // Remove photo and reset
   removeBtn.addEventListener('click', (event) => {
     event.stopPropagation();
     if (activeScanController) activeScanController.abort();
@@ -366,9 +381,8 @@ document.addEventListener('DOMContentLoaded', () => {
     defaultState.style.display = 'block';
   });
 
+  // Check before submit
   imageForm.addEventListener('submit', (event) => {
-    // The origin select is hidden now, so the browser can't point at it.
-    // Check it here and show our own message instead.
     if (!fileInput.files[0]) {
       event.preventDefault();
       showErrorModal('Upload a Photo', 'Upload a photo of a menu first so we can find the dish and its country.');
