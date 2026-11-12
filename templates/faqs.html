@@ -234,8 +234,7 @@
         });
       }
 
-      // A clicked category stays highlighted while the page scrolls to it,
-      // even if its section is too short to reach the top of the screen
+      // Keep the clicked category highlighted while the page scrolls to it
       let clickLockUntil = 0;
       navLinks.forEach((link) => {
         link.addEventListener("click", () => {
@@ -256,8 +255,7 @@
           }
         });
 
-        // At the very bottom the last section can't scroll up to the top,
-        // so mark it active when the page is scrolled all the way down
+        // At the bottom, highlight the last section (it's too short to reach the top)
         const atBottom =
           window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
         if (atBottom && sections.length) {

@@ -19,7 +19,7 @@ class AppNav extends HTMLElement {
       <div class="nav-overlay" id="nav-overlay"></div>
     `;
 
-    // Initialize navbar scripts immediately after rendering
+    // Set up the navbar right after it's added
     this.initNavigation();
   }
 
@@ -29,21 +29,21 @@ class AppNav extends HTMLElement {
     const navMenu = this.querySelector('#nav-menu');
     const navOverlay = this.querySelector('#nav-overlay');
 
-    // Sticky Scroll Effect (also runs once on load in case the page starts scrolled)
+    // Sticky navbar on scroll (also runs on load in case the page starts scrolled)
     const onScroll = () => {
       navbar && navbar.classList.toggle('scrolled', window.scrollY > 40);
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     onScroll();
 
-    // Mobile Menu Drawer Toggle
+    // Mobile menu open/close
     if (hamburgerBtn && navMenu && navOverlay) {
       const setMenu = (open) => {
         hamburgerBtn.classList.toggle('open', open);
         navMenu.classList.toggle('active', open);
         navOverlay.classList.toggle('active', open);
         hamburgerBtn.setAttribute('aria-expanded', String(open));
-        // Class on <html> instead of inline body styles: works on iOS Safari too
+        // Class on <html> so it also works on iOS Safari
         document.documentElement.classList.toggle('menu-open', open);
       };
       const toggleMenu = () => setMenu(!navMenu.classList.contains('active'));
@@ -59,7 +59,7 @@ class AppNav extends HTMLElement {
         if (e.key === 'Escape') setMenu(false);
       });
 
-      // Close the drawer if the viewport grows past the mobile breakpoint
+      // Close the menu if the screen gets wider than mobile
       window.matchMedia('(min-width: 821px)').addEventListener('change', (e) => {
         if (e.matches) setMenu(false);
       });

@@ -18,19 +18,18 @@ from shapley import compute_shapley, influence_shares
 
 
 app = Flask(__name__)
-# Behind a Cloudflare Tunnel (run_public.py) requests arrive through a proxy. ProxyFix reads the
-# X-Forwarded-* headers so Flask sees the real https link and visitor address. No effect locally.
+# Render/Cloudflare put a proxy in front of the app. ProxyFix makes Flask see the real https link.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
-# Largest upload accepted (menu photos). Cloudflare itself rejects anything over 100 MB.
+# Max upload size (16 MB)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 
 
-# 1. Load JSON dataset from root directory
+# Load the recipe dataset
 json_path = os.path.join(app.root_path, 'recipes.json')
 with open(json_path, 'r', encoding='utf-8') as f:
     RECIPES = json.load(f)
 
-# Safety check: recipes.json must be in the same order the .npy files were built from.
+# Make sure recipes.json is in the same order as the .npy files
 ORDER_FILE = os.path.join(app.root_path, 'embeddings_order.json')
 if os.path.exists(ORDER_FILE):
     with open(ORDER_FILE, encoding='utf-8') as f:
@@ -38,8 +37,7 @@ if os.path.exists(ORDER_FILE):
     if _order != [[r.get("title", ""), r.get("country", "")] for r in RECIPES]:
         raise RuntimeError("recipes.json does not match the .npy files. Re-run the vectorization.")
 
-# 2. Item-level soft matching (softmatch.py): needs <feature>_item_vecs.npy and <feature>_items.json
-#    for ingredients, actions, cookware and utensils, next to app.py.
+# Soft matching needs the vectors and item lists of each feature
 _FEATURES = ("ingredients", "actions", "cookware", "utensils")
 _missing = [
     name
@@ -54,8 +52,7 @@ if _missing:
     )
 MATCHER = SoftMatcher(app.root_path, RECIPES)
 
-# On Render the app is started by gunicorn, so the __main__ block at the bottom
-# never runs. Wake the OCR Space up in the background so the first upload is faster.
+# Gunicorn on Render skips __main__, so wake up the OCR Space here
 if ocr.OCR_API_URL and __name__ != "__main__":
     threading.Thread(target=ocr.warm_up, daemon=True).start()
 if len(MATCHER) != len(RECIPES):
@@ -65,7 +62,7 @@ if len(MATCHER) != len(RECIPES):
     )
 
 
-# 3. Define feature weights (Adjust ratios as needed to equal 1.0)
+# Feature weights (should add up to 1.0)
 WEIGHTS = {
     "ingredients": 0.93,  
     "actions":     0.04,  
@@ -74,21 +71,19 @@ WEIGHTS = {
 }
 
 
-# Minimum blended similarity (0.0 - 1.0) the best match must reach. Below this the website
-# shows the "We Can't Find Your Dish" pop-up on the search page instead of an empty results page.
+# Lowest score we still show results for. Below this the low similarity popup shows.
 SIMILARITY_THRESHOLD = 0.35
 
 
 def no_result_page(error_desc, error_title="We Can't Find Your Dish"):
-    """Send the user back to the search page with the error pop-up."""
+    """Go back to the search page and show the error popup."""
     return render_template("index.html", error_title=error_title, error_desc=error_desc)
 
 
 def split_names(text):
-    """Split "A, B; C (x, y) / D" into ["A", "B", "C (x, y)", "D"].
-    The separators  , ; | /  and new lines only count outside brackets, so
-    "Mie Goreng (fried noodles, spicy)" stays one name.
-    Keep this in step with splitNames() in templates/index.html."""
+    """Split a list of names like "A, B; C (x, y) / D". Commas inside brackets don't split.
+    Same as splitNames() in index.html.
+    """
     names, current, depth = [], [], 0
     for ch in str(text):
         if ch in "([":
@@ -105,14 +100,12 @@ def split_names(text):
 
 
 def normalize_name(text):
-    """Comparison form of a dish name: Unicode-normalised, lower-cased, single spaces."""
+    """Lowercase and clean up a dish name so names can be compared."""
     return " ".join(unicodedata.normalize("NFKC", str(text)).casefold().split())
 
 
 def recipe_names(recipe):
-    """Normalised title plus every alternative title of a recipe.
-    An alternative_title that lists several names is accepted BOTH as the separate names
-    and as the whole text, so the search works however the page sends it."""
+    """All the names of a recipe: its title and its alternative titles."""
     names = {normalize_name(recipe.get("title", ""))}
     raw = recipe.get("alternative_title") or recipe.get("alternative_titles") or []
     if not isinstance(raw, (list, tuple, set)):
@@ -132,12 +125,12 @@ def parse_items(text_field):
     return [item.strip().title() for item in text_field.split(",") if item.strip()]
 
 
-# Let the explainer learn the dataset (typo fixes, generic cooking steps, grounding vocabulary)
+# Give the explainer the dataset (for typo fixes and grounding)
 init_explainer(RECIPES, parse_items)
 
 
 def format_recipe_url(link):
-    """Formats recipe link to ensure absolute HTTP/HTTPS URL standard."""
+    """Add https:// to recipe links that don't have it."""
     if not link:
         return ""
     if link.startswith("http://") or link.startswith("https://"):
@@ -150,10 +143,11 @@ def home():
     return render_template("index.html")
 
 
-# Finds the closest matching dish in the target country and compares ingredients, actions, and similar dishes.
+# Search logic: find the closest dish in the target country
 def low_similarity_page(message, score, dish_title, origin_country, target_country, recipe_id=None):
-    """Back to the search page with the low-similarity popup (View results anyway / No).
-    The popup's 'View results anyway' button posts the same search again with force=1."""
+    """Back to the search page with the low similarity popup.
+    "View results anyway" sends the same search again with force=1.
+    """
     return render_template(
         "index.html",
         similarity_warning=message,
@@ -166,7 +160,7 @@ def low_similarity_page(message, score, dish_title, origin_country, target_count
 
 
 def blend_scores(per_feature):
-    """Weighted blend of the four per-feature score arrays (NaN = category empty in both dishes)."""
+    """Combine the four feature scores using the weights. NaN = empty in both dishes, so it's skipped."""
     weighted_sum = np.zeros(len(RECIPES))
     weight_used = np.zeros(len(RECIPES))
     for feature_name, weight in WEIGHTS.items():
@@ -178,7 +172,7 @@ def blend_scores(per_feature):
 
 
 def shapley_for(per_feature, idx):
-    """Shapley values + influence shares + per-feature scores for the pair (source, recipe idx)."""
+    """Shapley values, influence shares and feature scores for one pair of dishes."""
     raw_sims = {name: float(per_feature[name][idx]) for name in WEIGHTS}
     used = {name: not np.isnan(value) for name, value in raw_sims.items()}
     used_weight = sum(WEIGHTS[name] for name in WEIGHTS if used[name]) or 1.0
@@ -190,19 +184,17 @@ def shapley_for(per_feature, idx):
 
 @lru_cache(maxsize=32)
 def feature_scores_for_source(source_idx):
-    """Per-feature scores of every recipe against one source dish (cached: pin clicks reuse it)."""
+    """Scores of every recipe against one dish (cached so map pin clicks are faster)."""
     return {name: MATCHER.scores(name, source_idx) for name in WEIGHTS}
 
 
 def get_search_results(dish_name, origin_country, target_country, force=False, recipe_id=None):
 
 
-    # ---- 2. find the source dish (exact title + origin country, ignoring capitals) ----
+    # Find the searched dish (same name and origin country)
     source_dish = None
     source_idx = None
-    # Several recipes can share a title or alternative title (e.g. five "Banh Mi" recipes in
-    # Vietnam). When the dropdown sends the exact recipe_id, use that recipe, as long as it
-    # really has this name and origin country. Otherwise fall back to the first name match.
+    # Some recipes share a name (like the many Banh Mi), so use recipe_id if we got one
     def is_match(recipe):
         return (
             normalize_name(dish_name) in recipe_names(recipe)
@@ -247,13 +239,11 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
     regional_variations = []
     international_similarities = []
 
-    # ---- 3. score every recipe against the source dish ----
+    # Score every recipe against the searched dish
     per_feature = feature_scores_for_source(source_idx)
     total_scores = blend_scores(per_feature)
 
-    # The searched dish itself is never a candidate. Without this, a search where origin and
-    # target are the same country matches the dish with itself (100%), so every entity shows
-    # as "shared" and no GPT explanation is generated.
+    # Don't let the dish match itself (happens when origin and target are the same country)
     target_indices = [
         index
         for index, recipe in enumerate(RECIPES)
@@ -276,8 +266,7 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
 
 
 
-    # Below the threshold: do NOT load the results yet. Go back to the search page and let the
-    # user choose (popup: "View results anyway" re-posts with force=1, "No" stays on the page).
+    # Score too low: go back and ask the user first instead of loading the results
     if total_scores[best_index] < SIMILARITY_THRESHOLD and not force:
         return low_similarity_page(
             f'No dish from {target_country.title()} in our dataset is similar enough to '
@@ -292,10 +281,7 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
 
     similarity_score = round(float(total_scores[best_index]) * 100, 2)
 
-    # Shapley values of the four entity-type scores (Chapter 3 formula). Used only as input to
-    # the GPT explanation. A category that is empty in both dishes (NaN) is left out and the
-    # other weights are re-normalised exactly like total_scores, so the values still add up
-    # to the displayed score.
+    # Shapley values for the GPT explanation. Empty categories are skipped so they still add up to the score.
     shapley, influence, clean_sims = shapley_for(per_feature, best_index)
     feature_scores = {name: round(value, 4) for name, value in clean_sims.items()}
     if abs(sum(shapley.values()) * 100 - similarity_score) > 0.01:
@@ -333,7 +319,7 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
             break
 
 
-    # --- ENTITY EXTRACTION & COMPARISON LOGIC ---
+    # Compare the entities of the two dishes
     source_ingredients = set(parse_items(source_dish.get("ingredient_text", "")))
     recommended_ingredients = (
         set(parse_items(recommended_dish.get("ingredient_text", "")))
@@ -382,14 +368,14 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
         },
     }
 
-    # --- AI EXPLANATION (GPT-4o via explainer.py; cached; template fallback) ---
+    # GPT explanation (cached, uses the template if GPT fails)
     explanation = None
     explanation_source = None
     if best_index != source_idx:
         evidence = build_evidence(source_dish, recommended_dish, similarity_score, influence)
         explanation, explanation_source = get_explanation(evidence)
 
-    # Weight percentages mapped for UI progress bars
+    # Weights in percent for the progress bars
     feature_weights = {
         key: round(value * 100) for key, value in WEIGHTS.items()
     }
@@ -414,11 +400,8 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
 
 @app.route("/api/explain-pin")
 def explain_pin():
-    """
-    GPT explanation for ONE dish on the map (regional similarity / international similarity),
-    compared with the searched dish. Same pipeline as the main match: cleaned evidence ->
-    cache -> GPT-4o -> grounding check. The scores are recomputed here from the recipe
-    indices, so the browser cannot influence what is sent to GPT.
+    """GPT explanation for one dish on the map. The scores are recomputed here
+    so the browser can't change what gets sent to GPT.
     """
     try:
         source_idx = int(request.args.get("source", ""))
@@ -438,14 +421,14 @@ def explain_pin():
     return jsonify({
         "idx": idx,
         "explanation": explanation,
-        "source": explanation_source,          # "ai" = GPT, "template" = fallback
+        "source": explanation_source,  # "ai" or "template"
         "featureScores": {k: round(v, 4) for k, v in clean_sims.items()},
     })
 
 
 @app.errorhandler(413)
 def file_too_large(_error):
-    """Upload bigger than MAX_CONTENT_LENGTH."""
+    """Upload is bigger than 16 MB."""
     message = "This photo is too large. Please upload an image under 16 MB."
     if request.path == "/extract-dish-info":
         return jsonify({"success": False, "error": "too_large", "message": message, "matches": []}), 413
@@ -483,8 +466,7 @@ def extract_dish_info():
         try:
             lines = ocr.automatic_ocr(image)
         except ocr.UnsupportedScriptError as error:
-            # Khmer / Burmese / unreadable. If some dish still matched (e.g. an
-            # English line on the menu), carry on, otherwise tell the user.
+            # Khmer/Burmese or unreadable text. A dish might still match (like an English line), so try first.
             lines = error.lines
             if not ocr.find_recipes(ocr.romanize_lines(lines), recipes=RECIPES):
                 return jsonify({
@@ -526,9 +508,7 @@ def search_image():
     extracted_dish_name = request.form.get("extracted_dish_name", "").strip()
 
     try:
-        # A chosen menu item no longer needs the original file. This keeps the
-        # change-dish flow working after the browser returns from results and
-        # clears its file input for security.
+        # Dish already picked, so we don't need the photo again (the browser clears it after going back)
         if extracted_dish_name and origin_country:
             return get_search_results(extracted_dish_name, origin_country, target_country)
 
@@ -567,7 +547,7 @@ def search_image():
 def analysis():
     return render_template("analysis.html")
 
-#---ANALYSIS PAGE API---
+# --- ANALYSIS PAGE API ---
 
 COUNTRY_REGIONS = {
     "CHINA": "East Asia",
@@ -588,7 +568,7 @@ COUNTRY_REGIONS = {
     "TURKIYE": "West Asia"
 }
 
-#ANALYSIS PAGE: 1. Normalize the country name and grouped them into regions.
+# Analysis page 1: normalize country names and group them by region
 def normalize_analysis_country(country):
     if not country:
         return ""
@@ -627,7 +607,7 @@ def get_analysis_countries():
         for region, countries in sorted(regions.items())
     }
 
-#ANALYSIS PAGE: 2. Function to get the recipe count per country.
+# Analysis page 2: recipe count per country
 
 def get_analysis_country_counts():
     counts = {}
@@ -644,7 +624,7 @@ def get_analysis_country_counts():
 
     return counts
 
-#ANALYSIS PAGE: 3. Function to get the recipe count per region
+# Analysis page 3: recipe count per region
 def get_analysis_region_counts():
     counts = {}
 
@@ -659,7 +639,7 @@ def get_analysis_region_counts():
 
     return counts
 
-#ANALYSIS PAGE: 4. Returns the count of the entity, which sorts everything from most common to least common.
+# Analysis page 4: count each entity, most common first
 def get_analysis_top_entities(recipes, field, limit=15):
     total_recipes = len(recipes)
 
@@ -674,7 +654,7 @@ def get_analysis_top_entities(recipes, field, limit=15):
         if not value:
             continue
 
-        # Count each entity only once per recipe.
+        # Count each entity once per recipe
         items = set(parse_items(value))
 
         for item in items:
@@ -701,9 +681,9 @@ def get_analysis_top_entities(recipes, field, limit=15):
 
     return results[:limit]
 
-#ANALYSIS PAGE: 4. Function to get analysis on the country selected by the user.
+# Analysis page 5: analysis for the countries the user picked
 def get_analysis_recipes_for_countries(countries):
-    # If there are not selected countries, all are queried.
+    # No countries picked = use all of them
     if not countries:
         return RECIPES
 
@@ -724,24 +704,24 @@ def get_analysis_recipes_for_countries(countries):
         ) in selected_countries
     ]
 
-#ANALYSIS PAGE: 4. Function to get the overview analysis of the recipe count per category.
+# Analysis page 6: overview of the recipe counts
 @app.route("/api/analysis/overview")
 def analysis_overview():
     return jsonify({
-        "countries_by_region": #Calls the helper function to count the recipe per region.
+        "countries_by_region":  # countries grouped by region
             get_analysis_countries(), 
 
         "country_counts":
-            get_analysis_country_counts(), #Calls the helper function to count the recipe per country.
+            get_analysis_country_counts(),  # recipe count per country
 
         "region_counts":
-            get_analysis_region_counts(), #Calls the helper function to count the recipe per region.
+            get_analysis_region_counts(),  # recipe count per region
 
-        "total_recipes": #Count the number of recipes on the dataset.
+        "total_recipes":  # total recipes in the dataset
             len(RECIPES)
     })
 
-#ANALYSIS PAGE: 5. Function that receives the user's selected country and return the top ingredients results back.
+# Analysis page 7: top ingredients of the picked countries
 @app.route("/api/analysis/ingredients")
 def analysis_ingredients():
     countries = request.args.getlist("country")
@@ -761,7 +741,7 @@ def analysis_ingredients():
         )
     })
 
-#ANALYSIS PAGE: 5. Function that receives the user's selected country and return the top directions results back.
+# Analysis page 8: top cooking actions of the picked countries
 @app.route("/api/analysis/instructions")
 def analysis_instructions():
     countries = request.args.getlist("country")
@@ -805,10 +785,8 @@ def faqs():
 
 
 if __name__ == "__main__":
-    # Load the OCR models in the background so the first upload is fast.
-    # With the reloader off there is only one process, so start the warm-up directly.
-    # If the reloader is ever turned on, Flask starts the app twice (a watcher + the
-    # real app); WERKZEUG_RUN_MAIN is only set in the real one, so load them once.
+    # Load the OCR models in the background so the first upload is faster.
+    # Only load them in the real app process (the reloader starts the app twice).
     USE_RELOADER = False
     if not USE_RELOADER or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
         threading.Thread(target=ocr.warm_up, daemon=True).start()

@@ -68,7 +68,7 @@
               required
             />
             <ul id="dish-dropdown-list" class="dropdown-list hidden"></ul>
-            <!-- The exact recipe picked from the dropdown (several recipes can share a name) -->
+            <!-- The exact recipe picked from the list (some recipes share a name) -->
             <input type="hidden" name="recipe_id" id="dish-recipe-id">
           </div>
         </div>
@@ -161,7 +161,7 @@
               <img id="selected-dish-image" class="selected-dish-image" alt="" />
             </button>
 
-            <!-- Shown when the dish picker is closed without choosing a dish -->
+            <!-- Shows when the dish picker was closed without picking a dish -->
             <button type="button" id="select-dish-prompt" class="select-dish-prompt" style="display: none;" aria-label="Select dish from the image">
               <span class="select-dish-prompt-icon" aria-hidden="true">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -194,8 +194,7 @@
         <div class="form-row">
           <div class="form-group half-width">
             <label id="img-origin-label">COUNTRY OF ORIGIN</label>
-            <!-- Filled in automatically from the dish found in the photo, so it
-                 isn't a dropdown. The hidden select still sends the value. -->
+            <!-- Filled in from the dish in the photo, not a dropdown. The hidden select sends the value. -->
             <div id="img-origin-display" class="origin-display is-placeholder"
                  role="status" aria-live="polite" aria-labelledby="img-origin-label">Country of Origin</div>
             <select id="img-origin" name="origin_country" class="origin-select-hidden" tabindex="-1" aria-hidden="true">
@@ -261,8 +260,7 @@
 
   <app-footer></app-footer>
 
-  <!-- Menu matches are intentionally selected by the user before comparison. -->
-  <!-- Menu matches are intentionally selected by the user before comparison. -->
+  <!-- The user picks a dish from the menu matches before comparing -->
 <div
   id="dish-picker-overlay"
   class="modal-overlay hidden"
@@ -280,7 +278,7 @@
     <h3 id="dish-picker-title" class="modal-title">Choose a Dish from the Menu</h3>
     <p class="modal-desc">We found these dishes in the image. Select the one you want to compare.</p>
     
-    <!-- JavaScript populates .dish-picker-option buttons here -->
+    <!-- JS adds the dish buttons here -->
     <div id="dish-picker-list" class="dish-picker-list"></div>
   </div>
 </div>
@@ -537,24 +535,23 @@
   </script>
 
 <script>
-  let DISH_DATABASE = [];   // kept: other scripts (e.g. ocr.js) may read it
+  let DISH_DATABASE = [];   // kept in case other scripts use it
   let DISH_RECORDS = [];
 
-  // Title + every alternative title of a record, lower-cased.
+  // Title and all alternative titles of a recipe, lowercase
   function recordNames(record) {
     return [record.title, ...record.alternatives].map((n) => n.toLowerCase());
   }
 
-  // All records whose title OR alternative title equals `name`.
+  // All recipes whose title or alternative title is `name`
   function recordsForName(name) {
     const key = (name || "").trim().toLowerCase();
     if (!key) return [];
     return DISH_RECORDS.filter((r) => recordNames(r).includes(key));
   }
 
-  // Split "A, B; C (x, y) / D" into ["A", "B", "C (x, y)", "D"]. The separators  , ; | /  and
-  // new lines only count outside brackets, so "Mie Goreng (fried noodles, spicy)" stays one name.
-  // Keep this in step with split_names() in app.py.
+  // Split "A, B; C (x, y) / D" into separate names. Commas inside brackets don't split.
+  // Same as split_names() in app.py.
   function splitNames(text) {
     const names = [];
     let current = "";
@@ -593,7 +590,7 @@
 
   async function loadRecipeDatabase() {
     try {
-      // Bypasses browser cache to guarantee loading the updated JSON file
+      // Skip the browser cache so we always get the latest recipes
       const response = await fetch('/recipes.json?v=' + new Date().getTime());
       if (response.ok) {
         const data = await response.json();
@@ -637,7 +634,7 @@
     let activeIndex = -1;
     let currentMatches = [];
 
-    // Keep a copy of every origin option so the list can be restored after narrowing.
+    // Save all the origin options so we can bring them back later
     const allOriginOptions = originSelect
       ? [...originSelect.options].map((opt) => opt.cloneNode(true))
       : [];
@@ -652,15 +649,15 @@
 
       const real = [...originSelect.options].filter((opt) => opt.value !== "");
       if (allowed && real.length === 1) {
-        originSelect.value = real[0].value;          // origin is settled
+        originSelect.value = real[0].value;          // only one country
       } else if (real.some((opt) => opt.value === previous)) {
-        originSelect.value = previous;               // keep a still-valid choice
+        originSelect.value = previous;               // keep the old choice if it's still valid
       } else {
-        originSelect.value = "";                     // back to the placeholder
+        originSelect.value = "";                     // back to "Select..."
       }
     }
 
-    // Once the dish name is settled, only its country/countries are offered.
+    // Once a dish is picked, only show its countries
     function autoFillOriginCountry(dishName) {
       const picked = pickedRecord();
       if (picked && dishName && recordNames(picked).includes(dishName.trim().toLowerCase())) {
@@ -684,10 +681,8 @@
       return String(text || "").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
     }
 
-    // Searches the title AND every alternative title, but gives ONE row per recipe (recipe_id),
-    // so recipes that share an alternative title (e.g. five "Banh Mi" recipes) are listed
-    // separately instead of being merged under one name.
-    // Best first: exact name, starts with, contains. A row shows the name that matched best.
+    // Search titles and alternative titles, one row per recipe (so the many Banh Mi
+    // recipes each get their own row). Order: exact match, starts with, contains.
     function getTopMatches(query, limit = 8) {
       const q = query.trim().toLowerCase();
       if (!q) return [];
@@ -703,7 +698,7 @@
           const lower = label.toLowerCase();
           const rank = lower === q ? 0 : lower.startsWith(q) ? 1 : lower.includes(q) ? 2 : -1;
           if (rank < 0) continue;
-          // Lower rank wins; on a tie the real title wins over an alternative name.
+          // Lower rank wins. On a tie, the real title beats an alternative name.
           if (!best || rank < best.rank || (rank === best.rank && best.isAlt && !isAlt)) {
             best = { label, isAlt, rank };
           }
@@ -729,9 +724,8 @@
         li.className = "dropdown-item";
         li.appendChild(document.createTextNode(match.label.trim()));
 
-        // The note under the name. A real dish title lists that dish's alternative names; an
-        // alternative name says which dish it is for. A dish with no alternative names has no note.
-        // Each row is one recipe, so the note only describes that recipe.
+        // Note under the name: a title shows its other names, an alternative name
+        // shows which dish it belongs to. No other names = no note.
         const notes = [];
         if (match.isAlt) {
           notes.push("alternative name for " + match.record.title);
@@ -755,8 +749,7 @@
       dropdownList.classList.remove("hidden");
     }
 
-    // Picking a row fixes the exact recipe: its recipe_id is sent with the search and the
-    // origin country is set to that recipe's country.
+    // Picking a row picks that exact recipe: its recipe_id gets sent and the origin is set
     function chooseMatch(match) {
       const clean = match.label.trim();
       dishInput.value = clean;
@@ -783,7 +776,7 @@
     }
 
     dishInput.addEventListener("input", () => {
-      if (recipeIdInput) recipeIdInput.value = "";   // typed by hand: no recipe picked yet
+      if (recipeIdInput) recipeIdInput.value = "";   // typed by hand, no recipe picked yet
       renderDropdown(getTopMatches(dishInput.value));
       autoFillOriginCountry(dishInput.value);
     });
@@ -927,15 +920,13 @@
     }
   });
 </script>
-  <!-- When the server sends the page back with a message (dish not found, no similar dish,
-       no recipes for the target country, image problems...), it is carried here and the
-       script below pops the error modal open. -->
+  <!-- If the server sends back an error (dish not found, image problem...),
+       the script below shows it in the error popup -->
   {% if error_desc %}
   <div id="server-error" hidden data-title="{{ error_title }}" data-desc="{{ error_desc }}"></div>
   {% endif %}
 
-  <!-- LOW-SIMILARITY POPUP. When even the closest dish is below the similarity threshold, the
-       server sends the user back here (no results yet) with the details in this element. -->
+  <!-- LOW SIMILARITY POPUP. Shows when even the closest dish is below the threshold -->
   {% if similarity_warning %}
   <div id="similarity-warning-data" hidden
        data-message="{{ similarity_warning }}"
@@ -963,7 +954,7 @@
     </div>
   </div>
 
-  <!-- "View results anyway" posts the same search again, with force=1 -->
+  <!-- "View results anyway" sends the same search again with force=1 -->
   <form id="simWarningForm" action="/search-text" method="POST" hidden>
     <input type="hidden" name="dish_name" id="simWarningDish">
     <input type="hidden" name="origin_country" id="simWarningOrigin">
@@ -992,7 +983,7 @@
         if (match) select.value = match.value;
       }
 
-      // NO: close the popup and put the search back in the form so it can be changed.
+      // NO: close the popup and put the search back in the form
       function closeWarning() {
         overlay.hidden = true;
         document.removeEventListener("keydown", onKey);
@@ -1015,7 +1006,7 @@
       });
       document.addEventListener("keydown", onKey);
 
-      // VIEW RESULTS ANYWAY: same search again, with force=1.
+      // VIEW RESULTS ANYWAY: send the same search again with force=1
       yesBtn.addEventListener("click", () => {
         document.getElementById("simWarningDish").value = data.dataset.dish || "";
         document.getElementById("simWarningOrigin").value = data.dataset.origin || "";

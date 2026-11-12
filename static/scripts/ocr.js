@@ -274,7 +274,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Show preview, then scan
-  // Same limit as MAX_CONTENT_LENGTH in app.py (16 MB)
+  // Same 16 MB limit as app.py
   const MAX_UPLOAD_BYTES = 16 * 1024 * 1024;
 
   function displayPreview(file) {
@@ -282,8 +282,7 @@ document.addEventListener('DOMContentLoaded', () => {
       showErrorModal('Unsupported File', 'Please upload an image file.');
       return;
     }
-    // Check the size here: on Render the server cuts off a too-big upload,
-    // so the browser never receives the server's "too large" answer
+    // Check size here, Render cuts off big uploads before the server can answer
     if (file.size > MAX_UPLOAD_BYTES) {
       fileInput.value = '';
       showErrorModal('Image Too Large', 'This photo is too large. Please upload an image under 16 MB.');

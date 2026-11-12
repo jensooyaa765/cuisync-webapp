@@ -1,14 +1,4 @@
-"""Download CuiSync's dataset files during the Render build.
 
-The .json / .npy data files are not in GitHub (see .gitignore), so Render
-can't get them from the repo. This script downloads any that are missing
-from a private Hugging Face dataset repo:
-
-    HF_DATA_REPO = your-username/cuisync-data
-    HF_TOKEN     = a Hugging Face token that can read it
-
-If all the files are already here (like on your own computer), it does nothing.
-"""
 import os
 import sys
 
@@ -17,7 +7,7 @@ FEATURES = ("ingredients", "actions", "cookware", "utensils")
 REQUIRED = ["recipes.json"] + [
     f"{feature}_{suffix}" for feature in FEATURES for suffix in ("item_vecs.npy", "items.json")
 ]
-OPTIONAL = ["embeddings_order.json"]  # app.py uses it as a safety check if it's there
+OPTIONAL = ["embeddings_order.json"]  # app.py only uses it as a safety check
 
 
 def main():

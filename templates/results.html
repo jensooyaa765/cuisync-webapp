@@ -14,9 +14,8 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/results.css') }}">
 
   <style>
-    /* Mobile pinch-zoom: let our pointer handlers own all touch gestures on the
-       full-screen map (one finger pans, two fingers pinch-zoom). Without this the
-       browser hijacks the gesture and fires pointercancel. */
+    /* Mobile: our code handles touch on the full-screen map (1 finger pans, 2 fingers zoom).
+       Without this the browser takes over the gesture. */
     .modal-map-viewport,
     .modal-map-viewport * {
       touch-action: none;
@@ -60,7 +59,7 @@
       <div class="inner-content">
         <h2 class="section-heading">DISH COMPARISON</h2>
 
-        <!-- Read-only summary of the search that produced this page -->
+        <!-- Summary of the search -->
         <div class="readonly-search-bar">
           <div class="field-item cuisine-field">
             <span class="field-label">CUISINE</span>
@@ -85,7 +84,7 @@
         </p>
 
         <div class="comparison-grid">
-          <!-- Left Card: Original/Source Dish -->
+          <!-- Left card: searched dish -->
           <div class="dish-card">
             <div class="dish-img-wrapper">
               <img src="{{ source_dish.image_link if source_dish.image_link else url_for('static', filename='assets/no-image.svg') }}"
@@ -113,13 +112,13 @@
             </div>
           </div>
 
-          <!-- Overall similarity badge, sits between the two photos -->
+          <!-- Similarity badge between the two photos -->
           <div class="similarity-badge" role="img" aria-label="{{ score }} percent similar">
             <span class="badge-score">{{ score }}<small>%</small></span>
             <span class="badge-label">SIMILAR</span>
           </div>
 
-          <!-- Right Card: Recommended/Target Country Dish -->
+          <!-- Right card: recommended dish -->
           <div class="dish-card">
             <div class="dish-img-wrapper">
               <img src="{{ recommended_dish.image_link if (recommended_dish and recommended_dish.image_link) else url_for('static', filename='assets/no-image.svg') }}"
@@ -165,7 +164,7 @@
 
         <div class="entities-card">
 
-          <!-- Category Filter Radio Buttons -->
+          <!-- Category filter buttons -->
           <div class="entity-filters">
             <label class="filter-pill pill-all">
               <input type="radio" name="entity_filter" value="all" checked hidden>
@@ -188,7 +187,7 @@
             </label>
           </div>
 
-          <!-- Gold = shared, maroon = only in the source dish, green = only in the target dish -->
+          <!-- Gold = shared, maroon = only in the searched dish, green = only in the recommended dish -->
           {% for key, label in [('ingredients', 'INGREDIENTS'), ('actions', 'COOKING ACTIONS'), ('cookware', 'COOKWARES'), ('utensils', 'UTENSILS')] %}
             {% set cat = entities[key] %}
             <div class="entity-group">
@@ -220,7 +219,7 @@
         <div class="heading-rule"></div>
 
         <div class="similarity-metrics-grid">
-          <!-- Donut: overall similarity score -->
+          <!-- Donut: overall similarity -->
           <div class="donut-box">
             <div class="donut-chart" style="--percent: {{ score }};">
               <div class="donut-center">
@@ -230,8 +229,7 @@
             <span class="donut-label">OVERALL SIMILARITY SCORE</span>
           </div>
 
-          <!-- Per-category similarity from the model (softmatch.py) for the recommended dish.
-               These are the same scores that are blended into the overall score above. -->
+          <!-- Score per category from softmatch.py (these make up the overall score) -->
           <div class="sim-bars">
             {% for label, key in [('INGREDIENT SIMILARITY', 'ingredients'), ('COOKING ACTION SIMILARITY', 'actions'), ('UTENSIL SIMILARITY', 'utensils'), ('COOKWARE SIMILARITY', 'cookware')] %}
               {% if feature_scores is defined and key in feature_scores %}
@@ -250,7 +248,7 @@
           </div>
         </div>
 
-        <!-- AI Explanation Card (GPT-4o via explainer.py, grounded in the Shapley contributions) -->
+        <!-- GPT explanation card (from explainer.py) -->
         <div class="quote-card">
           <span class="quote-icon" aria-hidden="true">&ldquo;&rdquo;</span>
           <p class="quote-text">
@@ -285,21 +283,19 @@
       </div>
     </div>
 
-    <!-- Map Pan Wrapper styled as the outer card -->
+    <!-- Map wrapper (the outer card) -->
     <div class="map-pan-wrapper">
       <div class="map-placeholder">
-        <!-- Drawn by drawWorldMap() from real country shapes (d3 + world-atlas), the same way as the
-             Analysis page, so there are no hard-coded country outlines. The map fills this box exactly:
-             JS sets the viewBox to the box's pixel size, so the pins layer below lines up with it.
-             Keep id/class: the pins use them. -->
+        <!-- Map drawn by drawWorldMap() with d3, like the Analysis page. It fills this box
+             so the pins line up. Don't change the id/class, the pins use them. -->
         <svg id="world-map-img" class="map-graphic" viewBox="0 0 1000 320" preserveAspectRatio="none"
              role="img" aria-label="Map of Asia"></svg>
 
-        <!-- Dynamic Pins Container -->
+        <!-- Pins go here -->
         <div id="map-pins-layer"></div>
       </div>
 
-      <!-- Bottom bar: opens the full-screen map -->
+      <!-- Bottom bar, opens the full-screen map -->
       <button type="button" class="route-info-bar" id="openMapModal">
         <div class="route-details">
           <div class="route-text-group">
@@ -322,7 +318,7 @@
 <div class="map-modal-overlay" id="mapModal">
   <div class="map-modal-container">
     
-    <!-- COLLAPSIBLE LEFT SIDEBAR PANEL -->
+    <!-- LEFT SIDEBAR (can be collapsed) -->
     <aside class="map-panel-left" id="mapSidebar">
       <button type="button" class="btn-toggle-sidebar" id="toggleSidebar" aria-label="Toggle Panel" aria-controls="mapSidebar" aria-expanded="true">
         <svg class="chevron-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -331,7 +327,7 @@
       </button>
 
       <div class="panel-inner-scroll">
-        <!-- Dish Card -->
+        <!-- Dish card -->
         <div class="panel-dish-card">
           <div class="panel-img-wrapper">
             <img id="modalDishImg" src="" alt="Selected Dish">
@@ -351,13 +347,13 @@
           </div>
         </div>
 
-        <!-- Tab Controls -->
+        <!-- Tabs -->
         <div class="panel-tabs">
           <button type="button" class="tab-btn active" data-tab="recipe">RECIPE BREAKDOWN</button>
           <button type="button" class="tab-btn" data-tab="similarity">SIMILARITY SUMMARY</button>
         </div>
 
-        <!-- TAB CONTENT 1: RECIPE BREAKDOWN -->
+        <!-- TAB 1: RECIPE BREAKDOWN -->
         <div class="tab-content active" id="tab-recipe">
           <div class="panel-card">
             <div class="panel-legend">
@@ -389,7 +385,7 @@
 
         </div>
 
-        <!-- TAB CONTENT 2: SIMILARITY SUMMARY (same layout as the results page; refreshed per dish by JS) -->
+        <!-- TAB 2: SIMILARITY SUMMARY (same as the results page, updated per dish) -->
         <div class="tab-content" id="tab-similarity">
           <div class="origin-note" id="modalOriginNote"></div>
 
@@ -431,7 +427,7 @@
     </aside>
 
 
-    <!-- RIGHT MAIN CANVAS: MAP VIEW -->
+    <!-- RIGHT SIDE: MAP -->
     <main class="map-canvas-right">
       <div class="map-filter-bar" role="group" aria-label="Map layers">
         <button type="button" class="map-filter-pill map-filter-pill--main active" data-layer="main" role="switch" aria-checked="true">
@@ -505,7 +501,7 @@
   </script>
 
 <script>
-  // Placeholder for dishes with no image, or whose image link no longer works.
+  // Placeholder for dishes with no image or a broken image link
   const NO_IMAGE_SRC = "{{ url_for('static', filename='assets/no-image.svg') }}";
   function setDishImage(img, link) {
     img.onerror = () => { img.onerror = null; img.src = NO_IMAGE_SRC; };
@@ -529,15 +525,14 @@
   const MAP_DATA = JSON.parse(document.getElementById('map-data').textContent);
 
   document.addEventListener('DOMContentLoaded', () => {
-    // UI Elements
+    // Elements
     const openBtn = document.getElementById('openMapModal');
     const closeBtn = document.getElementById('closeMapModal');
     const modal = document.getElementById('mapModal');
     const toggleSidebarBtn = document.getElementById('toggleSidebar');
     const sidebar = document.getElementById('mapSidebar');
 
-    // Open or collapse the map panel. The chevron on the toggle button follows
-    // the .collapsed class in CSS, so it always matches the panel.
+    // Open or close the map panel (the arrow follows the .collapsed class)
     function setSidebarOpen(open) {
       if (!sidebar) return;
       sidebar.classList.toggle('collapsed', !open);
@@ -546,14 +541,13 @@
     const modalMapBody = document.getElementById('modalMapBody');
     const mapPanWrapper = document.querySelector('.map-pan-wrapper');
     const originalMapPlaceholder = document.querySelector('.map-pan-wrapper .map-placeholder');
-    // Safe fallback for initial active dish
+    // Default dish to show first
     const activeDish = MAP_DATA.recommendedDish || MAP_DATA.sourceDish || {};
 
-    // True while a pinch is in progress (and briefly after), so a finger lifting
-    // off a pin at the end of a pinch does not count as a tap on that pin.
+    // True during a pinch (and a bit after), so lifting a finger off a pin isn't a tap
     let suppressPinClick = false;
 
-    // Helper: Safely generate chip HTML for entity lists
+    // Make the chip HTML for an entity list (escaped)
     function escapeHtml(value) {
       return String(value).replace(/[&<>"']/g, ch => (
         { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
@@ -566,13 +560,10 @@
     }
 
     // ----------------------------------------------------------------
-    // PER-DISH COMPARISON DATA
-    // The main (recommended) dish uses the server-computed entities. For any
-    // other pin we need that dish's own comparison against the source dish:
-    //   1) dish.entities, if the backend sends it (same shape as the main
-    //      `entities`: {ingredients: {shared, source_unique, target_unique}, ...})
-    //   2) otherwise it is computed here from the dish's own entity lists,
-    //      using any of the field names below.
+    // COMPARISON DATA FOR EACH DISH
+    // The main dish uses the entities from the server. Other pins use
+    // dish.entities if the server sent it, otherwise it's computed here
+    // from the dish's own entity lists.
     // ----------------------------------------------------------------
     const ENTITY_FIELDS = {
       ingredients: ['ingredients', 'ingredient_text', 'ingredient_list'],
@@ -621,13 +612,11 @@
       return result;
     }
 
-    // Returns {ingredients, actions, cookware, utensils} (each a category
-    // object or null when that dish has no data for it), or null if none.
+    // Returns {ingredients, actions, cookware, utensils} (null if a category has no data), or null if none
     function getEntitiesFor(dish) {
       if (!dish) return null;
 
-      // Original dish: list everything it has (shared + source-only) in the
-      // source color, since there is nothing to compare it against.
+      // Original dish: nothing to compare, so show everything in the source color
       if (dish === MAP_DATA.sourceDish) {
         if (!MAP_DATA.entities) return null;
         const own = {};
@@ -657,7 +646,7 @@
       return found ? out : null;
     }
 
-    // shared / (shared + only-in-source + only-in-target), as a whole percent.
+    // shared / (shared + only source + only target), as a whole percent
     function overlapPercent(cat) {
       if (!cat) return null;
       const shared = (cat.shared || []).length;
@@ -678,7 +667,7 @@
       return items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1];
     }
 
-    // Same AI text the results page shows, used for the main comparison.
+    // Same GPT text as the results page, for the main dish
     const pageQuote = document.querySelector('.similarity-section .quote-text');
     const pageQuoteNote = document.querySelector('.similarity-section .footer-note');
     const MAIN_EXPLANATION_HTML = pageQuote ? pageQuote.innerHTML : '';
@@ -715,19 +704,18 @@
       return `<strong>${src}</strong> and <strong>${tgt}</strong>${lead || ' compared.'} ${parts.join(' ')}`;
     }
 
-    // GPT summaries for the pins (regional similarities / international similarities).
-    // Fetched from /api/explain-pin when a pin is selected, then kept for the rest of the visit.
+    // GPT text for the other pins, from /api/explain-pin when clicked, then saved for the visit
     const PIN_EXPL_CACHE = new Map();   // recipe idx -> { explanation, source }
-    let pinExplToken = 0;               // lets a late answer be ignored if another pin was clicked
+    let pinExplToken = 0;               // so a late answer is ignored if another pin was clicked
 
     function showExplanation(elem, html, text, badge, note, loading) {
-      // Writes to the explanation card in the Similarity Summary tab.
+      // Put the text in the explanation card of the Similarity tab
       const targets = [
         [elem, 'modalExplBadge', 'modalExplNote']
       ];
       targets.forEach(([el, badgeId, noteId]) => {
         if (!el) return;
-        if (html !== null) el.innerHTML = html; else el.textContent = text;   // GPT text is never inserted as HTML
+        if (html !== null) el.innerHTML = html; else el.textContent = text;   // never insert GPT text as HTML
         el.style.opacity = loading ? '0.6' : '';
         el.style.fontStyle = loading ? 'italic' : '';
         const b = document.getElementById(badgeId);
@@ -760,13 +748,13 @@
         .then(data => {
           if (!data || !data.explanation) throw new Error('empty explanation');
           PIN_EXPL_CACHE.set(dish.idx, data);
-          if (token === pinExplToken) useAnswer(data);      // ignore if the user moved to another pin
+          if (token === pinExplToken) useAnswer(data);      // ignore if the user already clicked another pin
         })
         .catch(() => { if (token === pinExplToken) useTemplate(); });
     }
 
     function renderSimilarity(dish, entities) {
-      pinExplToken++;   // any request still in flight for a previous pin is now stale
+      pinExplToken++;   // older requests don't matter anymore
       const isOrigin = dish === MAP_DATA.sourceDish;
       const simTab = document.getElementById('tab-similarity');
       if (simTab) simTab.classList.toggle('is-origin', isOrigin);
@@ -785,8 +773,7 @@
       if (donut) donut.style.setProperty('--percent', score === null ? 0 : score);
       if (scoreElem) scoreElem.textContent = score === null ? 'N/A' : `${score}%`;
 
-      // The main (recommended) dish shows the model's per-category scores, like the results page.
-      // Other pins only have their entity lists, so they show the overlap of those lists.
+      // Main dish: the model's scores. Other pins: the overlap of their entity lists.
       const isMain = dish === MAP_DATA.recommendedDish;
       const featureScores = MAP_DATA.featureScores || {};
       document.querySelectorAll('#modalSimBars .sim-bar').forEach(bar => {
@@ -800,8 +787,7 @@
         if (val) val.textContent = pct === null ? 'N/A' : `${pct}%`;
       });
 
-      // Explanation: the GPT text from the results page for the main dish; every other pin
-      // asks the server for its own GPT explanation (template text only if that call fails).
+      // Main dish uses the results page text, other pins ask the server for their own
       const explElem = document.getElementById('modalExplanation');
       if (explElem) {
         if (isMain && MAIN_EXPLANATION_HTML.trim()) {
@@ -812,11 +798,11 @@
       }
     }
 
-    // Helper: Update Left Sidebar with Active Dish Data
+    // Fill the sidebar with the selected dish
     function updateSidebarDish(dish) {
       if (!dish || typeof dish !== 'object') return;
 
-      // Header details
+      // Header
       const titleElem = document.getElementById('modalDishTitle');
       if (titleElem) titleElem.textContent = dish.title || 'Unknown Dish';
 
@@ -829,15 +815,15 @@
       const regAltElem = document.getElementById('modalDishRegion');
       if (regAltElem) regAltElem.textContent = `${(dish.region || 'UNKNOWN').toUpperCase()} REGION`;
 
-      // Dish Image
+      // Dish image
       const imgElem = document.getElementById('modalDishImg');
       if (imgElem) {
-        // Shows the "no image" placeholder if the dish has no image or it fails to load
+        // "No image" placeholder if there's no image or it fails to load
         setDishImage(imgElem, dish.image_link);
         imgElem.style.display = 'block';
       }
 
-      // External Recipe Link
+      // Recipe link
       const linkElem = document.getElementById('modalRecipeLink');
       if (linkElem) {
         if (dish.recipe_link) {
@@ -846,7 +832,7 @@
         } else {
           linkElem.style.display = 'none';
         }
-        // "No recipe link available yet" message when the dish has no link
+        // "No recipe link available yet" if there's no link
         let noLinkElem = document.getElementById('modalNoRecipeLink');
         if (!noLinkElem) {
           noLinkElem = document.createElement('span');
@@ -858,7 +844,7 @@
         noLinkElem.style.display = dish.recipe_link ? 'none' : '';
       }
 
-      // Dynamic dish names in entity legend
+      // Dish names in the legend
       const activeNameElems = document.querySelectorAll('.active-dish-name');
       activeNameElems.forEach(el => {
         el.textContent = dish.title || '';
@@ -869,9 +855,8 @@
         sourceLabelElem.textContent = (MAP_DATA.sourceDish && MAP_DATA.sourceDish.title) || '';
       }
 
-      // Helper: render shared / source-unique / target-unique chips for one entity category.
-      // Color always reflects uniqueness (gold = shared, maroon = unique to source dish,
-      // green = unique to the active/target dish) -- never the entity category itself.
+      // Chips for one category. Gold = shared, maroon = only in the searched dish,
+      // green = only in this dish.
       function renderEntityGroup(elementId, categoryData) {
         const wrapper = document.getElementById(elementId);
         if (!wrapper) return;
@@ -885,7 +870,7 @@
           createChips(categoryData.target_unique, 'chip-green');
       }
 
-      // Recipe breakdown + similarity summary for THIS dish (not always the main one)
+      // Breakdown and summary for this dish (not always the main one)
       const entities = getEntitiesFor(dish);
       const recipeTab = document.getElementById('tab-recipe');
       if (recipeTab) recipeTab.classList.toggle('is-origin', dish === MAP_DATA.sourceDish);
@@ -897,33 +882,28 @@
     }
 
     // ==================================
-    // MAP PINS: build a pin for the main dish, top 3 regional similarities,
-    // and top 5 international similarities, drop them on the map (randomized
-    // within their country's shape), and wire up hover preview + click.
+    // MAP PINS: main dish, top 3 regional and top 5 international dishes,
+    // placed randomly inside their country, with hover preview and click.
     // ==================================
     const mapSvg = document.getElementById('world-map-img');
     const pinsLayer = document.getElementById('map-pins-layer');
 
     // ----------------------------------
-    // WORLD MAP: drawn from real country shapes, the same way as the Analysis page's map.
-    //
-    // The SVG's viewBox is always set to the map box's real pixel size and the projection is
-    // re-fitted to that size, so one SVG unit == one pixel. The pins layer is the very same box,
-    // so a pin at (x, y) sits exactly on the spot of the map drawn at (x, y). (Before, the SVG kept
-    // a fixed 2:1 shape while the pins layer followed the card's height, so the pins drifted off
-    // their countries.) Each pin remembers its longitude/latitude and is re-projected whenever the
-    // box changes size (small preview <-> full screen).
+    // WORLD MAP: real country shapes, like the Analysis page.
+    // The SVG is always the same pixel size as the box, so the pins line up with
+    // the countries. Each pin keeps its longitude/latitude and gets placed again
+    // when the box changes size (small preview <-> full screen).
     // ----------------------------------
     const WORLD_TOPOLOGY_URL =
       'https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json'; // Natural Earth
 
-    // The area the map is framed on: a box that covers Asia (same frame as the Analysis page).
+    // Map is zoomed to Asia (same as the Analysis page)
     const ASIA_FRAME = {
       type: 'MultiPoint',
       coordinates: [[22, -12], [150, 56]]
     };
 
-    // Land colours. The origin, target and other matched countries are tinted.
+    // Land colors, the countries in the results get tinted
     const MAP_COLORS = {
       land: '#e4d9c6',
       border: '#fbf6ec',
@@ -935,12 +915,12 @@
     let worldTopologyPromise = null;
     let worldFeatures = null;            // all country shapes
     let mapProjection = null;            // projection for the current box size
-    let mapWidth = 0;                    // current box size in pixels (== SVG viewBox)
+    let mapWidth = 0;                    // box size in pixels (same as the SVG viewBox)
     let mapHeight = 0;
     const countryFeatures = new Map();   // normalized country name -> map shape
-    const placedPins = [];               // { pin, lonlat } for every pin on the map
+    const placedPins = [];               // { pin, lonlat } for each pin
 
-    // World shapes are fetched once, then reused.
+    // Load the world shapes once and reuse them
     function loadWorldTopology() {
       if (!worldTopologyPromise) {
         worldTopologyPromise = d3.json(WORLD_TOPOLOGY_URL).catch(error => {
@@ -951,7 +931,7 @@
       return worldTopologyPromise;
     }
 
-    // Lets dataset names (e.g. "Turkiye") match the map's names ("Turkey").
+    // Match dataset names (like "Turkiye") to the map's names ("Turkey")
     function normalizeMapCountryName(name) {
       const key = String(name || '')
         .normalize('NFD')
@@ -984,8 +964,7 @@
       });
     }
 
-    // Draws the countries to fill the map box. Returns false if the box has no size right now
-    // (e.g. it is hidden); it is drawn again as soon as it gets one.
+    // Draw the countries in the box. Returns false if the box is hidden (no size yet).
     function drawWorldMap() {
       if (!mapSvg || !worldFeatures || !originalMapPlaceholder) return false;
 
@@ -999,7 +978,7 @@
       mapProjection = d3.geoMercator().fitSize([width, height], ASIA_FRAME);
       const path = d3.geoPath(mapProjection);
 
-      // Which countries are on this result page.
+      // Countries on this results page
       const originKey = normalizeMapCountryName(MAP_DATA.sourceDish && MAP_DATA.sourceDish.country);
       const firstRegional = (MAP_DATA.regionalVariations || [])[0];
       const targetKey = normalizeMapCountryName(
@@ -1028,7 +1007,7 @@
       return true;
     }
 
-    // Puts one pin on its longitude/latitude, as a percentage of the map box.
+    // Place a pin at its longitude/latitude (as % of the box)
     function positionPin(entry) {
       if (!mapProjection) return;
       const point = mapProjection(entry.lonlat);
@@ -1037,15 +1016,15 @@
       entry.pin.style.top = `${(point[1] / mapHeight) * 100}%`;
     }
 
-    // Redraws the map for the box's current size and re-places every pin on it.
+    // Redraw the map for the new size and move all the pins
     function refreshWorldMap() {
       if (drawWorldMap()) placedPins.forEach(positionPin);
     }
 
-    // A random [longitude, latitude] on land inside the country's real shape.
+    // Random [longitude, latitude] inside the country
     function randomLonLatInCountry(feature) {
       const [[west, south], [east, north]] = d3.geoBounds(feature);
-      const lonSpan = east >= west ? east - west : east + 360 - west;   // shape crossing the date line
+      const lonSpan = east >= west ? east - west : east + 360 - west;   // shape that crosses the date line
 
       for (let attempt = 0; attempt < 300; attempt++) {
         let lon = west + Math.random() * lonSpan;
@@ -1055,13 +1034,12 @@
         if (d3.geoContains(feature, [lon, lat])) return [lon, lat];
       }
 
-      // Very thin shape: fall back to its centre.
+      // Very thin shape, just use its center
       return d3.geoCentroid(feature);
     }
 
-    // Where a dish's pin goes: inside its country, or null if the country is not on the map.
-    // Several pins can share a small country, so of a few random spots we take the one farthest
-    // from the pins already placed, which keeps them from sitting on top of each other.
+    // Where a pin goes inside its country (null if the country isn't on the map).
+    // Try a few random spots and pick the one farthest from other pins so they don't overlap.
     function getLonLatForCountry(country) {
       const feature = countryFeatures.get(normalizeMapCountryName(country));
       if (!feature) return null;
@@ -1085,7 +1063,7 @@
       return best;
     }
 
-    // Single floating hover/focus preview card, reused for every pin.
+    // One preview card, reused for every pin
     const tooltip = document.createElement('div');
     tooltip.className = 'map-pin-tooltip';
     tooltip.innerHTML = `
@@ -1103,7 +1081,7 @@
     const tooltipScore = tooltip.querySelector('.map-pin-tooltip-score');
 
     function showTooltip(pinElem, dish, score) {
-      // Touch screens: tapping a pin must not pop up the preview card.
+      // On touch screens, tapping a pin shouldn't show the preview
       if (window.matchMedia('(hover: none)').matches) return;
 
       setDishImage(tooltipImg, dish.image_link);
@@ -1125,8 +1103,7 @@
       let left = pinRect.left + (pinRect.width / 2) - (tooltipRect.width / 2);
       let top = pinRect.top - tooltipRect.height - 12;
 
-      // Keep the card on-screen: flip below the pin if it would run off the
-      // top, and clamp horizontally within the viewport.
+      // Keep the card on screen (show it below the pin if there's no room on top)
       if (top < 8) {
         top = pinRect.bottom + 12;
       }
@@ -1140,7 +1117,7 @@
       tooltip.classList.remove('visible');
     }
 
-    // Builds one pin <button> for a dish and drops it on the map.
+    // Make one pin <button> for a dish and put it on the map
     function createPin(dish, score, typeClass, extraClass) {
       if (!dish || !dish.country) return null;
 
@@ -1164,19 +1141,18 @@
       pin.addEventListener('mouseleave', hideTooltip);
       pin.addEventListener('blur', hideTooltip);
       pin.addEventListener('click', () => {
-        // Ignore the tap that ends a pinch gesture.
+        // Ignore the tap at the end of a pinch
         if (suppressPinClick) return;
         document.querySelectorAll('.map-pin.is-active').forEach(p => p.classList.remove('is-active'));
         pin.classList.add('is-active');
         updateSidebarDish(dish);
-        // Reopen the panel if it was collapsed, so the new dish is visible.
+        // Open the panel again if it was closed
         setSidebarOpen(true);
       });
 
       pinsLayer.appendChild(pin);
 
-      // The pin remembers its longitude/latitude; it is placed (and re-placed after every resize)
-      // as a percentage of the map box, which is the same box the SVG map fills.
+      // The pin keeps its longitude/latitude and gets placed again after every resize
       const entry = { pin, lonlat };
       placedPins.push(entry);
       positionPin(entry);
@@ -1189,8 +1165,7 @@
       pinsLayer.innerHTML = '';
       placedPins.length = 0;
 
-      // Original dish, in its home country (also a "main" pin, so the
-      // MAIN DISH filter toggles both main dishes together).
+      // Original dish in its country (also a "main" pin, so MAIN DISH toggles both)
       if (MAP_DATA.sourceDish) {
         createPin(MAP_DATA.sourceDish, null, 'main', 'map-pin--origin');
       }
@@ -1208,8 +1183,7 @@
       });
     }
 
-    // Load the shapes, draw the map, drop the pins on it, then keep it in step with the box size
-    // (the same box is shown small on the page and large in the full-screen map).
+    // Load the shapes, draw the map, add the pins, and redraw when the box changes size
     (async () => {
       try {
         await loadWorldMapData();
@@ -1229,10 +1203,9 @@
 
     // ==================================
     // FULL-SCREEN MAP: PAN & ZOOM
-    // Desktop: drag to pan, scroll wheel or the +/-/RESET buttons to zoom.
-    // Mobile:  one finger drags to pan, two fingers pinch to zoom.
-    // Panning starts only when the pointer goes down on empty map space (not on a
-    // pin), so pins keep working normally for hover/click.
+    // Desktop: drag to move, scroll or +/-/RESET to zoom.
+    // Mobile: 1 finger to move, 2 fingers to zoom.
+    // Dragging only starts on empty map space, so pins still work.
     // ==================================
     const zoomInBtn = document.getElementById('mapZoomIn');
     const zoomOutBtn = document.getElementById('mapZoomOut');
@@ -1241,12 +1214,11 @@
     const MIN_SCALE = 1;
     const MAX_SCALE = 4;
 
-    // Pin size while zoomed. The whole map layer (pins included) is enlarged by the zoom, so the
-    // pins are scaled back down: their size ON SCREEN falls by PIN_SHRINK for every +1x of zoom,
-    // but never below PIN_MIN_SIZE of their normal size (so they stay visible and clickable).
-    const PIN_SHRINK = 0.10;     // Pins shrink 10% for each +1x zoom
-    const PIN_MIN_SIZE = 0.80;   // Pins never go below 80% of normal size
-    const PIN_LOCK_ZOOM = 3.0;   // At 3x zoom and beyond, the pin size is locked at 80%
+    // Pin size when zoomed. Zooming makes the pins bigger too, so we shrink them back,
+    // but not below PIN_MIN_SIZE so they stay clickable.
+    const PIN_SHRINK = 0.10;     // 10% smaller per +1x zoom
+    const PIN_MIN_SIZE = 0.80;   // never smaller than 80%
+    const PIN_LOCK_ZOOM = 3.0;   // from 3x zoom it stays at 80%
     let mapScale = 1;
     let mapTranslateX = 0;
     let mapTranslateY = 0;
@@ -1260,10 +1232,8 @@
       return Math.min(Math.max(value, min), max);
     }
 
-    // Pan limits. The map may be dragged past its own edges into empty space:
-    // a wide gutter on the left (the sidebar's width plus breathing room) so
-    // the part of the map hidden under the panel can be pulled into view, and
-    // a smaller gutter on the other sides.
+    // How far the map can be dragged past its edges. More on the left so the
+    // part under the sidebar can be pulled into view.
     const PAN_GUTTER = 160;
 
     function clampMapTranslate() {
@@ -1283,10 +1253,8 @@
       mapTranslateY = clamp(mapTranslateY, minY, maxY);
     }
 
-    // The stylesheet keeps the map on its own GPU layer (will-change: transform), which is drawn once
-    // at 1x and then stretched, so the map and pin photos go blurry when zoomed. We keep that
-    // layer only while the map is moving (smooth), and release it a moment after, so the browser
-    // redraws the map at its real zoomed size (sharp).
+    // will-change makes the map blurry when zoomed, so only use it while moving
+    // and remove it after so the map gets redrawn sharp.
     let sharpenTimer = null;
 
     function applyMapTransform() {
@@ -1301,10 +1269,8 @@
       originalMapPlaceholder.style.transform =
         `translate(${mapTranslateX}px, ${mapTranslateY}px) scale(${mapScale})`;
 
-      // Calculate the pin's visible size first, then divide by mapScale
-      // because the entire map (including pins) is being zoomed.
-      // Before 3x: 100% -> 90% -> 80% as zoom increases.
-      // At 3x and beyond: permanently lock the visible pin size at 80%.
+      // Visible pin size, divided by mapScale since the pins get zoomed too.
+      // 100% -> 90% -> 80%, then stays at 80% from 3x.
       const pinSizeOnScreen = mapScale >= PIN_LOCK_ZOOM
         ? PIN_MIN_SIZE
         : Math.max(
@@ -1325,8 +1291,7 @@
       applyMapTransform();
     }
 
-    // Zooms toward a specific point (in viewport-local pixel coordinates),
-    // keeping that point visually fixed under the cursor/finger.
+    // Zoom toward a point and keep it under the cursor/finger
     function zoomMapTo(newScale, pivotX, pivotY) {
       const clampedScale = clamp(newScale, MIN_SCALE, MAX_SCALE);
       const scaleRatio = clampedScale / mapScale;
@@ -1346,13 +1311,12 @@
     }
 
     if (modalMapBody) {
-      // ---- MOBILE: hand all touch gestures on the map to our pointer handlers ----
-      // Without touch-action: none the browser claims the gesture for native page
-      // scroll/zoom and sends pointercancel, so two-finger pinch never reaches us.
-      // (The same rule is also in the <style> block at the top of this file.)
+      // ---- MOBILE: our code handles all touch on the map ----
+      // Without touch-action: none the browser takes the pinch for itself.
+      // (Same rule is in the <style> at the top too.)
       modalMapBody.style.touchAction = 'none';
 
-      // iOS Safari also fires its own pinch "gesture" events that can zoom the whole page.
+      // iOS Safari has its own pinch events that zoom the whole page, stop those
       ['gesturestart', 'gesturechange', 'gestureend'].forEach(evt => {
         modalMapBody.addEventListener(evt, e => e.preventDefault());
       });
@@ -1366,7 +1330,7 @@
         zoomMapTo(mapScale * zoomFactor, pivotX, pivotY);
       }, { passive: false });
 
-      // ---- Touch / mouse pointers: one finger (or mouse) pans, two fingers pinch-zoom ----
+      // ---- Touch / mouse: 1 finger (or mouse) moves, 2 fingers zoom ----
       const activePointers = new Map();   // pointerId -> { x, y }
       let isPinching = false;
       let pinchStartDistance = 0;
@@ -1393,7 +1357,7 @@
         pinchLastMidX = midX;
         pinchLastMidY = midY;
 
-        // Stop the pins from reacting to the fingers lifting at the end of the pinch.
+        // So the pins don't react when the fingers lift after a pinch
         suppressPinClick = true;
         clearTimeout(pinchClickTimer);
       }
@@ -1401,14 +1365,14 @@
       modalMapBody.addEventListener('pointerdown', (e) => {
         activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-        // Second finger down (even on a pin): start pinching.
+        // Second finger down (even on a pin): start the pinch
         if (activePointers.size === 2) {
           startPinch();
           return;
         }
         if (activePointers.size > 2) return;
 
-        // One pointer: pan, but not when it starts on a pin (so pins stay tappable).
+        // One finger: move the map, unless it started on a pin
         if (e.target.closest('.map-pin')) return;
 
         isPanning = true;
@@ -1429,7 +1393,7 @@
           const { distance, midX, midY } = getPinchPoints();
           const rect = modalMapBody.getBoundingClientRect();
 
-          // Follow the fingers' midpoint, then zoom around it.
+          // Follow the middle of the fingers and zoom around it
           mapTranslateX += midX - pinchLastMidX;
           mapTranslateY += midY - pinchLastMidY;
           pinchLastMidX = midX;
@@ -1456,7 +1420,7 @@
         if (isPinching && activePointers.size < 2) {
           isPinching = false;
 
-          // One finger still down: carry on panning from where it is, with no jump.
+          // One finger left: keep moving from there without jumping
           if (activePointers.size === 1) {
             const [rest] = Array.from(activePointers.values());
             isPanning = true;
@@ -1473,7 +1437,7 @@
           isPanning = false;
           modalMapBody.classList.remove('is-panning');
 
-          // Let pins be tappable again shortly after the last finger lifts.
+          // Pins work again shortly after the last finger lifts
           if (suppressPinClick) {
             clearTimeout(pinchClickTimer);
             pinchClickTimer = setTimeout(() => { suppressPinClick = false; }, 300);
@@ -1492,10 +1456,8 @@
     if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => zoomMapByFactor(1 / 1.4));
     if (zoomResetBtn) zoomResetBtn.addEventListener('click', resetMapTransform);
 
-    // Modal Control Handlers
-    // NOTE: the map placeholder (image + area map + live pins) is *moved* into
-    // the modal rather than cloned, so the pins keep their hover/click
-    // behavior instead of losing their event listeners on a clone.
+    // Full-screen map buttons. The map is moved (not copied) into the overlay
+    // so the pins keep their click and hover events.
     if (openBtn && modal) {
       openBtn.addEventListener('click', () => {
         if (modalMapBody && originalMapPlaceholder) {
@@ -1519,7 +1481,7 @@
 
       resetMapTransform();
 
-      // Move the map back into the small dashboard preview.
+      // Move the map back to the small preview
       if (mapPanWrapper && originalMapPlaceholder && !mapPanWrapper.contains(originalMapPlaceholder)) {
         mapPanWrapper.insertBefore(originalMapPlaceholder, mapPanWrapper.firstChild);
       }
@@ -1536,14 +1498,14 @@
       }
     });
 
-    // Sidebar Collapsible Toggle
+    // Open/close the sidebar
     if (toggleSidebarBtn && sidebar) {
       toggleSidebarBtn.addEventListener('click', () => {
         setSidebarOpen(sidebar.classList.contains('collapsed'));
       });
     }
 
-    // Sidebar Tab Navigation
+    // Sidebar tabs
     if (sidebar) {
       const tabBtns = sidebar.querySelectorAll('.tab-btn');
       const tabContents = sidebar.querySelectorAll('.tab-content');
@@ -1563,10 +1525,7 @@
       });
     }
 
-    // Map Filter Layer Toggles
-    // All three layers start ON (all pins visible). Clicking a pill toggles
-    // that category's pins on/off independently -- it does not affect the
-    // other two pills.
+    // Map layer toggles. All 3 start on. Each pill turns its own pins on/off.
     const filterPills = document.querySelectorAll('.map-filter-pill');
     filterPills.forEach(pill => {
       pill.classList.add('active');

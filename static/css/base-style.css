@@ -58,7 +58,7 @@ a {
   --pill-bg: #fefcf9;
   --dark-text: #2c1a1a;
   --chip-dark: #520909;
-  --nav-h: 56px; /* height of the navbar once scrolled (used by sticky sub-navs) */
+  --nav-h: 56px; /* navbar height when scrolled (for sticky sub-navs) */
 }
 
 /* ==========================================================================
@@ -82,10 +82,7 @@ a {
   transition: padding 0.4s ease, box-shadow 0.4s ease;
 }
 
-/* The blurred background lives on a pseudo-element. backdrop-filter on the
-   navbar itself turns it into the containing block for position:fixed
-   children, which broke the mobile drawer (its 100vh became the navbar's
-   height) as soon as the page was scrolled. */
+/* Blur is on ::before. Putting it on the navbar itself broke the mobile menu when scrolled. */
 .navbar::before {
   content: '';
   position: absolute;
@@ -109,8 +106,7 @@ a {
   backdrop-filter: blur(8px);
 }
 
-/* Hamburger button: hidden on desktop (this was the stray dot/box),
-   shown from the mobile media query below. */
+/* Hamburger button: hidden on desktop, shown on mobile (see below) */
 .hamburger-toggle {
   display: none;
   flex-direction: column;
@@ -257,7 +253,7 @@ a {
   text-decoration: underline;
 }
 
-/* Dataset Description (Matches footer links typography) */
+/* Dataset description (same font as the footer links) */
 .footer-dataset-desc {
   font-size: 0.8rem;
   color: #e0d0cc;
@@ -318,7 +314,7 @@ a {
     max-width: 300px;
     height: 100vh;
     height: 100dvh;
-    /* Links start at the top-left, below the close (X) button */
+    /* Links start at the top left, under the X button */
     padding: calc(90px + env(safe-area-inset-top, 0px)) 24px env(safe-area-inset-bottom, 0px);
     background-color: var(--maroon-dark);
     display: flex;
@@ -345,7 +341,7 @@ a {
     letter-spacing: 2px;
   }
 
-  /* Inputs under 16px make iOS Safari zoom the page on focus */
+  /* Under 16px, iPhones zoom in when you tap an input */
   input,
   select,
   textarea {

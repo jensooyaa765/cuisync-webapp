@@ -226,7 +226,7 @@
   margin-top: auto;
 }
 
-/* Small muted note above the dish cards (recipe links/images may be missing) */
+/* Small note above the dish cards (some links/images may be missing) */
 .recipe-availability-note {
   font-size: 0.72rem;
   line-height: 1.5;
@@ -235,7 +235,7 @@
   margin: -12px 0 20px;
 }
 
-/* Shown instead of the recipe button when a dish has no link */
+/* Shows instead of the recipe button if there's no link */
 .no-recipe-link {
   margin-top: auto;
   font-size: 0.68rem;
@@ -264,7 +264,7 @@
   background-color: var(--maroon-dark);
 }
 
-/* Overall similarity badge, overlapping the gap between the two photos */
+/* Similarity badge between the two photos */
 .similarity-badge {
   position: absolute;
   left: 50%;
@@ -408,7 +408,7 @@
   color: #ffffff;
 }
 
-/* Scoped to the breakdown card so the map sidebar's smaller chips are untouched */
+/* Only for the breakdown card, so the map sidebar chips stay small */
 .entities-card .entity-chip {
   padding: 3px 14px;
   border-radius: 999px;
@@ -463,7 +463,7 @@
   align-items: center;
 }
 
-/* --percent is set inline (0-100) to drive the filled arc */
+/* --percent (0-100) is set inline and fills the arc */
 .donut-chart {
   width: 170px;
   height: 170px;
@@ -614,7 +614,7 @@
   color: #ffffff;
 }
 
-/* Header Area */
+/* Header */
 .geo-map-header {
   display: flex;
   justify-content: space-between;
@@ -635,7 +635,7 @@
   max-width: 500px;
 }
 
-/* Outer Card Container */
+/* Outer card */
 .map-pan-wrapper {
   position: relative;
   width: 100%;
@@ -646,7 +646,7 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-/* Map Canvas Container */
+/* Map area */
 .map-placeholder {
   position: relative;
   width: 100%;
@@ -660,13 +660,13 @@
   left: 0;
   width: 100%;
   height: 100%;
-  /* Rose tint at the top fading to deep red behind the info bar */
+  /* Light red at the top fading to dark red behind the info bar */
   background: linear-gradient(
     180deg,
     rgba(154, 15, 20, 0.35) 30%,
     rgba(110, 10, 14, 0.85) 100%
   );
-  pointer-events: none; /* Allows clicks to pass through to the map image underneath */
+  pointer-events: none; /* Lets clicks go through to the map */
   z-index: 1;
 }
 
@@ -677,7 +677,7 @@
   display: block;
 }
 
-/* Dynamic Pins Layer */
+/* Pins layer */
 #map-pins-layer {
   position: absolute;
   top: 0;
@@ -688,19 +688,16 @@
   z-index: 2;
 }
 
-/* Hover grow of a pin. Registered so only THIS value animates; the zoom shrink below
-   (--pin-scale, set by JS) applies instantly and stays in step with the map while zooming.
-   Browsers without @property still work: the hover grow just isn't animated. */
+/* Pin hover grow. Registered so only this animates, the zoom size (--pin-scale)
+   changes right away. Old browsers just skip the animation. */
 @property --pin-hover {
   syntax: '<number>';
   inherits: false;
   initial-value: 1;
 }
 
-/* Individual Map Pin (circular dish thumbnail marker).
-   --pin-scale is calculated by the map zoom JavaScript. The JS accounts
-   for the map's outer scale, so CSS only applies the resulting pin scale.
-   --pin-hover is added separately for the hover/focus grow effect. */
+/* Map pin (round dish photo). --pin-scale comes from the zoom JS,
+   --pin-hover is for the hover grow. */
 .map-pin {
   position: absolute;
   transform: translate(-50%, -50%) scale(calc(var(--pin-scale, 1) * var(--pin-hover, 1)));
@@ -754,8 +751,8 @@
   border-color: var(--maroon-main);
 }
 
-/* Original dish pin: same size as the main dish, but a maroon ring inside a
-   gold halo so the two main pins are easy to tell apart. */
+/* Original dish pin: same size as the main one but maroon with a gold halo,
+   so you can tell them apart */
 .map-pin--origin {
   border-color: var(--maroon-main);
   box-shadow: 0 0 0 3px var(--gold-accent), 0 2px 8px rgba(0, 0, 0, 0.45);
@@ -767,7 +764,7 @@
   box-shadow: 0 0 0 3px var(--gold-accent), 0 4px 14px rgba(0, 0, 0, 0.55);
 }
 
-/* Hover / Focus Preview Card for a Pin */
+/* Preview card when hovering a pin */
 .map-pin-tooltip {
   position: fixed;
   display: none;
@@ -831,7 +828,7 @@
   margin-top: 2px;
 }
 
-/* Bottom bar: also the button that opens the full-screen map */
+/* Bottom bar, also opens the full-screen map */
 .route-info-bar {
   position: absolute;
   bottom: 1rem;
@@ -887,7 +884,7 @@
 }
 
 
-/* Modal Core Overlay */
+/* Full-screen map overlay */
 .map-modal-overlay {
   display: none;
   position: fixed;
@@ -914,10 +911,7 @@
   background-color: #e3d2bd;
 }
 
-/* Sidebar Styling
-   Positioned absolutely, floating on top of the map canvas, so the map
-   underneath can extend the full width of the screen instead of being
-   squeezed into the leftover space beside the panel. */
+/* Sidebar floats on top of the map so the map can use the full width */
 .map-panel-left {
   width: 360px;
   height: 100%;
@@ -1066,7 +1060,7 @@
   display: block;
 }
 
-/* Entity Chips & Legend */
+/* Entity chips and legend */
 .panel-legend {
   display: flex;
   gap: 10px;
@@ -1123,7 +1117,7 @@
   border: 1px solid #8f6b00;
 }
 
-/* Metrics & Progress Bars */
+/* Scores and progress bars */
 .modal-metric-box {
   background-color: var(--text-cream);
   padding: 12px;
@@ -1183,10 +1177,7 @@
   border-left: 3px solid #7a1414;
 }
 
-/* Right Map Viewport
-   Absolutely positioned to fill the entire modal container (full browser
-   width/height), so the map extends underneath the floating sidebar panel
-   rather than stopping at its edge. */
+/* Map fills the whole overlay, under the sidebar too */
 .map-canvas-right {
   position: absolute;
   top: 0;
@@ -1202,8 +1193,7 @@
 .map-filter-bar {
   position: absolute;
   top: 16px;
-  /* Sits clear of the sidebar by default (360px panel + 20px gutter);
-     slides back to the screen edge once the panel is collapsed. */
+  /* Stays right of the sidebar (360px + 20px), moves back when the sidebar is closed */
   left: 380px;
   display: flex;
   gap: 8px;
@@ -1215,10 +1205,9 @@
   left: 20px;
 }
 
-/* Layer toggles. Each pill takes its pin's ring color:
-   main = gold, regional = green, international = maroon. */
+/* Layer toggles, same colors as the pins: main = gold, regional = green, international = maroon */
 .map-filter-pill {
-  --pill-color: #7a1414;   /* fill when on / border + switch when off */
+  --pill-color: #7a1414;   /* fill when on, border + switch when off */
   --pill-ink: #ffffff;     /* text color when on */
   --pill-text: #7a1414;    /* text color when off */
   --pill-track: rgba(255, 255, 255, 0.35);
@@ -1303,7 +1292,7 @@
   transform: translateX(12px);
 }
 
-/* Off: cream pill, colored outline, switch knob on the left */
+/* Off: cream pill, colored border, knob on the left */
 .map-filter-pill:not(.active) .pill-switch {
   background-color: rgba(0, 0, 0, 0.18);
 }
@@ -1333,7 +1322,7 @@
 .modal-map-viewport {
   width: 100%;
   height: 100%;
-  background-color: #f1ede2; /* shows as the empty gutter when the map is panned past its edge */
+  background-color: #f1ede2; /* shows when the map is dragged past its edge */
   overflow: hidden;
   cursor: grab;
   touch-action: none;
@@ -1351,13 +1340,12 @@
   will-change: transform;
 }
 
-/* The full-screen overlay map should read clean, without the tinted gradient
-   used on the small dashboard preview. */
+/* No red tint on the full-screen map (only on the small preview) */
 .modal-map-viewport .map-placeholder::after {
   display: none;
 }
 
-/* Zoom Controls (bottom-right of the full-screen map) */
+/* Zoom buttons (bottom right of the full-screen map) */
 .map-zoom-controls {
   position: absolute;
   bottom: 20px;
@@ -1568,8 +1556,7 @@
   }
 }
 
-/* Fixed main nav on mobile: pins the top navbar and re-flows the subnav
-   and search bar underneath it instead of leaving them stacked/hidden. */
+/* Mobile: fixed navbar, with the subnav and search bar under it */
 @media (max-width: 768px) {
   main,
   section,
@@ -1697,7 +1684,7 @@
 /* ==========================================================================
    MAP OVERLAY SIDEBAR: recipe breakdown + similarity summary containers
    ========================================================================== */
-/* Restore chip colors globally (they were only defined inside the page card) */
+/* Chip colors for everywhere (they were only set inside the page card) */
 .chip-maroon {
   background-color: #e7b1b1;
   border: 1px solid #c97a7a;
@@ -1752,7 +1739,7 @@
   color: var(--text-muted);
 }
 
-/* Original dish selected: no comparison to show */
+/* Original dish picked, nothing to compare */
 .origin-note {
   display: none;
   background-color: #ece3cc;
@@ -1778,7 +1765,7 @@
   display: none;
 }
 
-/* Similarity tab: same donut + bars + quote card as the results page, scaled for the panel */
+/* Similarity tab: same donut, bars and quote as the results page, but smaller */
 .map-panel-left .donut-box {
   margin-bottom: 18px;
 }
@@ -1841,10 +1828,8 @@
    RESPONSIVE: REDESIGNED RESULTS SECTIONS
    ========================================================================== */
 @media (max-width: 850px) {
-  /* Stacked layout: cards sit in rows 1 and 3, the badge is pinned to the
-     thin middle row and centred on it, so it overlaps the bottom of the first
-     card and the top of the second regardless of how tall the cards are.
-     Explicit placement of the badge means DOM order doesn't matter. */
+  /* Stacked: cards in rows 1 and 3, the badge in the thin middle row
+     so it overlaps both cards no matter how tall they are */
   .comparison-grid {
     grid-template-rows: auto 28px auto;
     row-gap: 0;
@@ -1984,7 +1969,7 @@
     animation: panelSlideUp 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.3s backwards;
   }
 
-  /* Toggle: centred above the sheet's top edge */
+  /* Toggle centered above the top of the sheet */
   .btn-toggle-sidebar {
     top: -46px;
     right: auto;
@@ -1999,7 +1984,7 @@
     top: calc(-46px - env(safe-area-inset-bottom, 0px));
   }
 
-  /* The chevron points left on desktop: turn it to point down (open) / up (collapsed) */
+  /* Arrow points left on desktop, here it points down (open) or up (closed) */
   .btn-toggle-sidebar .chevron-icon {
     transform: rotate(-90deg);
   }
@@ -2018,7 +2003,7 @@
     height: 130px;
   }
 
-  /* Top bar: exit button in the first row, layer pills in a scrollable second row */
+  /* Top bar: exit button on top, layer pills in a scrollable row below */
   .btn-exit-map {
     top: calc(12px + env(safe-area-inset-top, 0px));
     right: max(12px, env(safe-area-inset-right, 0px));
@@ -2032,7 +2017,7 @@
     right: max(12px, env(safe-area-inset-right, 0px));
     overflow-x: auto;
     scrollbar-width: none;
-    padding-bottom: 4px; /* keeps the pills' shadow from being clipped */
+    padding-bottom: 4px; /* so the pill shadows don't get cut off */
   }
 
   .map-filter-bar::-webkit-scrollbar {
@@ -2055,7 +2040,7 @@
   }
 }
 
-/* Mobile: zoom with pinch, so the + and - buttons are hidden (RESET stays) */
+/* Mobile uses pinch zoom, so hide + and - (RESET stays) */
 @media (max-width: 768px) {
   #mapZoomIn,
   #mapZoomOut {
@@ -2120,8 +2105,7 @@
   }
 }
 
-/* Very narrow phones: the button gets its own full-width row at the bottom
-   so the cuisine name isn't squeezed into a thin column. */
+/* Very small phones: the button gets its own row so the name isn't squished */
 @media (max-width: 400px) {
   .readonly-search-bar .cuisine-field {
     grid-column: 1 / -1;

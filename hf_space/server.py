@@ -1,21 +1,18 @@
 """CuiSync OCR service (runs on the Hugging Face Space).
 
-It only reads menu photos. The website itself runs on Render and sends
-photos here.
+It only reads menu photos. The website runs on Render and sends the photos here.
 
     GET  /health  -> {"status": "ok", "models_ready": true/false}
-    POST /ocr     -> form fields: image (file), country (optional)
-                     answer: {"lines": [...]} or
-                             {"lines": [...], "error": "unsupported_script", "message": "..."}
+    POST /ocr     -> image (file), country (optional)
+                     returns {"lines": [...]} or {"lines": [...], "error": ..., "message": ...}
 
-If the OCR_API_TOKEN secret is set on the Space, requests must send
-the header "Authorization: Bearer <that token>".
+If OCR_API_TOKEN is set on the Space, requests need "Authorization: Bearer <token>".
 """
 import hmac
 import os
 import threading
 
-# The Space always runs PaddleOCR itself, never forwards to another service.
+# The Space always runs PaddleOCR itself
 os.environ.pop("OCR_API_URL", None)
 
 import cv2

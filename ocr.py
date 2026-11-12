@@ -10,38 +10,35 @@ import cv2
 import numpy as np
 from flask import has_app_context
 
-try:  # so OCR_API_URL can also be set in the .env file
+try:  # lets OCR_API_URL also come from the .env file
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
 
-# --- Where the OCR runs -----------------------------------------------
-# Normally PaddleOCR runs right here on this computer.
-# If OCR_API_URL is set (for example on Render), the photo is sent to the
-# Hugging Face Space at that address instead, and the Space reads it.
-# Then PaddleOCR doesn't have to be installed here at all.
+# --- Where the OCR runs ---
+# Locally PaddleOCR runs on this computer. If OCR_API_URL is set (like on Render),
+# the photo is sent to the Hugging Face Space instead, so PaddleOCR isn't needed here.
 OCR_API_URL = os.environ.get("OCR_API_URL", "").strip().rstrip("/")
 OCR_API_TOKEN = os.environ.get("OCR_API_TOKEN", "").strip()
-# A sleeping Space can take a minute or two to wake up, so wait this long
+# A sleeping Space can take a minute or two to wake up
 OCR_API_TIMEOUT = float(os.environ.get("OCR_API_TIMEOUT", "240"))
 
 if OCR_API_URL:
-    # Imported here, once, when the app starts. Importing it inside the function
-    # broke when two threads (the wake-up and an upload) imported it at the same
-    # time ("partially initialized module 'requests'").
+    # Import it once here. Importing inside the function broke when two threads
+    # did it at the same time.
     import requests
 else:
     from paddleocr import TextDetection, TextRecognition
     from paddlex.inference.pipelines.components import CropByPolys, SortQuadBoxes
 
 
-# --- Setup ------------------------------------------------------------
+# --- Setup ---
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 VENDOR_DIR = os.path.join(ROOT_DIR, ".vendor")
 
-# Some packages live in .vendor instead of the venv, so make them importable.
+# Some packages are in .vendor instead of the venv
 if os.path.isdir(VENDOR_DIR) and VENDOR_DIR not in sys.path:
     sys.path.insert(0, VENDOR_DIR)
 
@@ -63,7 +60,7 @@ except ModuleNotFoundError:
         "Install it with: pip install indic-transliteration"
     ) from None
 
-# pykakasi is optional. Without it, Japanese text falls back to unidecode.
+# pykakasi is optional, without it Japanese uses unidecode
 try:
     import pykakasi
     _kakasi = pykakasi.kakasi()
@@ -76,8 +73,7 @@ except ModuleNotFoundError:
     except ModuleNotFoundError:
         _kakasi = None
 
-# PyThaiNLP is optional too. It romanizes Thai properly; without it Thai
-# falls back to unidecode, which mixes up the letters ("aikyaangkhmin").
+# PyThaiNLP is optional too. Without it Thai uses unidecode, which messes up the letters.
 try:
     from pythainlp.tokenize import word_tokenize as _thai_word_tokenize
     from pythainlp.transliterate import romanize as _thai_romanize
@@ -93,9 +89,9 @@ except ModuleNotFoundError:
 logger = logging.getLogger(__name__)
 
 
-# --- Languages and models ---------------------------------------------
+# --- Languages and models ---
 
-# Country name (lowercase) -> PaddleOCR language code
+# Country -> PaddleOCR language code
 COUNTRY_LANG_MAP = {
     "china": "ch",
     "india": "hi",
@@ -111,10 +107,9 @@ COUNTRY_LANG_MAP = {
     "vietnam": "vi",
 }
 
-# PP-OCRv5 Mobile recognition model for each language.
-# A few languages share the same model, e.g. all the Latin-alphabet ones.
+# Recognition model for each language. Some share one model (like all Latin ones).
 PP_OCRV5_REC_MODELS = {
-    "ch": "PP-OCRv5_mobile_rec",      # also reads Japanese and English
+    "ch": "PP-OCRv5_mobile_rec",  # also reads Japanese and English
     "japan": "PP-OCRv5_mobile_rec",
     "korean": "korean_PP-OCRv5_mobile_rec",
     "th": "th_PP-OCRv5_mobile_rec",
@@ -128,94 +123,84 @@ PP_OCRV5_REC_MODELS = {
     "vi": "latin_PP-OCRv5_mobile_rec",
 }
 
-# One model finds where the text is; the ones above read it.
+# This model finds where the text is, the ones above read it
 DETECTION_MODEL = "PP-OCRv5_mobile_det"
 
-# Languages tried when we don't know where the menu is from.
-# English goes first so it wins ties on a plain English menu.
+# Languages to try when we don't know the country.
+# English is first so it wins ties on English menus.
 AUTO_OCR_LANGUAGES = (
     "en", "japan", "ch", "korean", "th", "hi",
     "ar", "vi", "id", "ms", "tl", "tr",
 )
 
-# Latin-alphabet languages (they share the English / Latin models)
+# Languages that use the Latin alphabet
 LATIN_LANGUAGES = ("en", "vi", "id", "ms", "tl", "tr")
 
-# The quick language check reads only this many of the longest lines
-# with every model, instead of the whole menu.
+# The language check only reads this many of the widest lines
 PROBE_LINES = 3
 
-# Lines the model is less sure about than this are thrown away
+# Lines below this confidence are thrown away
 MIN_LINE_CONFIDENCE = 0.20
 
 # How many lines a model reads at once
 RECOGNITION_BATCH_SIZE = 8
 
-# Lines the chosen model is less sure about than this are read again by
-# the other models, and the most confident reading is kept. This catches a
-# dish name written in a different script from the rest of the page, e.g.
-# a Korean title (불고기) on a recipe whose instructions are in English.
+# Lines below this are read again by the other models and the most sure reading wins.
+# This catches a dish name in a different script, like a Korean title on an English recipe.
 REREAD_CONFIDENCE = 0.70
 
-# Skip the re-read when too many lines are unsure: then the whole photo is
-# hard to read (blurry, or a script we don't support), so re-reading
-# wouldn't help and would only make the upload slower.
+# Too many unsure lines = the whole photo is bad (blurry or unsupported),
+# so re-reading won't help and just makes it slower
 MAX_REREAD_LINES = 8
 
-# A Latin-alphabet model can't read a Korean, Thai, Chinese... title, but it
-# may still be quite "sure" about the junk it reads (불고기 -> "TEH7|").
-# So short lines (dish names are short) are also re-read by the non-Latin
-# models, and kept only if that model is sure AND really finds its own script.
+# A Latin model can be "sure" about junk it reads from a Korean or Thai title.
+# So short lines (dish names) are also re-read by the non-Latin models,
+# and only kept if that model is sure and really finds its own script.
 SHORT_LINE_CHARS = 20
 MAX_SHORT_REREAD_LINES = 30
 
 
-# --- Matching settings ------------------------------------------------
+# --- Matching settings ---
 
-# A dish name can wrap onto at most this many lines.
+# A dish name can wrap onto at most this many lines
 MAX_JOINED_LINES = 3
 
-# Typo tolerance for OCR mistakes. Kept strict on purpose so a different
-# dish that just shares some words is never returned.
-FUZZY_MIN_LEN = 8            # shorter names must match exactly
+# Typo tolerance for OCR mistakes. Kept strict so a different dish isn't matched.
+FUZZY_MIN_LEN = 8  # shorter names must match exactly
 FUZZY_MAX_LEN_DIFF = 2
-FUZZY_LETTERS_PER_EDIT = 8   # about 1 wrong letter allowed per 8 letters
+FUZZY_LETTERS_PER_EDIT = 8  # about 1 wrong letter per 8 letters
 
-# Only look at the first 60 lines so a huge menu doesn't slow things down.
+# Only check the first 60 lines so big menus stay fast
 MAX_CANDIDATE_LINES = 60
 
-# Sounds-alike matching for Thai and Arabic (see loose_key). It's looser, so
-# it only compares Thai text with Thai dishes and Arabic text with Saudi
-# dishes, and only against the native name (alternative_title).
+# Sounds-alike matching for Thai and Arabic. Since it's looser, Thai text is only
+# compared with Thai dishes and Arabic with Saudi dishes (native name only).
 LOOSE_MATCH_COUNTRY = {"th": "thailand", "ar": "saudi arabia"}
-LOOSE_FUZZY_MIN_LEN = 7   # shorter sounds-alike keys must match exactly
+LOOSE_FUZZY_MIN_LEN = 7  # shorter keys must match exactly
 
-# Used when picking the best language. A model gets a bonus if its own
-# script shows up in the text, and a penalty if it only read Latin text
-# (those models can read English too, but shouldn't win on English menus).
+# For picking the language: bonus if a model finds its own script,
+# penalty if it only read Latin text (so it doesn't win on English menus)
 SCRIPT_MATCH_BONUS = 3.0
 SCRIPT_MISMATCH_PENALTY = 0.5
 
 
-# --- Script detection -------------------------------------------------
+# --- Script detection ---
 
-KANA_RANGE = re.compile(r"[\u3040-\u309F\u30A0-\u30FF]")      # Japanese kana
-CJK_RANGE = re.compile(r"[\u4E00-\u9FFF]")                    # Chinese characters / kanji
-HANGUL_RANGE = re.compile(r"[\uAC00-\uD7AF\u1100-\u11FF]")    # Korean
+KANA_RANGE = re.compile(r"[\u3040-\u309F\u30A0-\u30FF]")  # Japanese kana
+CJK_RANGE = re.compile(r"[\u4E00-\u9FFF]")  # Chinese characters / kanji
+HANGUL_RANGE = re.compile(r"[\uAC00-\uD7AF\u1100-\u11FF]")  # Korean
 THAI_RANGE = re.compile(r"[\u0E00-\u0E7F]")
-SEA_RANGE = THAI_RANGE                                        # only Thai for now
+SEA_RANGE = THAI_RANGE  # only Thai for now
 ARABIC_RANGE = re.compile(r"[\u0600-\u06FF]")
-DEVANAGARI_RANGE = re.compile(r"[\u0900-\u097F]")             # Hindi
-LATIN_DIACRITIC_RANGE = re.compile(r"[\u00C0-\u024F\u1E00-\u1EFF]")  # accented letters (vi, tr)
+DEVANAGARI_RANGE = re.compile(r"[\u0900-\u097F]")  # Hindi
+LATIN_DIACRITIC_RANGE = re.compile(r"[\u00C0-\u024F\u1E00-\u1EFF]")  # accented letters (Vietnamese, Turkish)
 
-# Khmer and Burmese. PaddleOCR has no model for either, so the OCR can't
-# read them. We only use these to spot them and tell the user.
+# Khmer and Burmese. PaddleOCR has no model for them, we only use these to detect them.
 KHMER_RANGE = re.compile(r"[\u1780-\u17FF\u19E0-\u19FF]")
 MYANMAR_RANGE = re.compile(r"[\u1000-\u109F\uAA60-\uAA7F]")
 
-# On menus we can read, the best model is usually 0.9+ sure on average.
-# On Khmer and Burmese menus every model just guesses (around 0.55),
-# so anything under this means the text is in a script we don't support.
+# Readable menus usually get 0.9+ confidence. Khmer/Burmese only get around 0.55
+# since every model is guessing, so below this = unsupported script.
 MIN_READABLE_CONFIDENCE = 0.70
 
 UNSUPPORTED_SCRIPT_MESSAGE = (
@@ -225,25 +210,24 @@ UNSUPPORTED_SCRIPT_MESSAGE = (
 )
 
 
-# A photo with no text (food, scenery...) still gets a few "text" boxes
-# from the detector, read as low-confidence gibberish. Khmer and Burmese
-# are also read as gibberish, so the reading alone can't tell them apart.
-# The detector can: it is sure about real writing in any script (high box
-# scores) but unsure about patterns that only look a bit like text.
-# Below this average box score, the photo is treated as having no text.
+# Photos with no text (food, scenery) still get a few weak "text" boxes.
+# Khmer/Burmese also read as gibberish, so the reading can't tell them apart,
+# but the detector can: it's sure about real writing, not about things that only look like text.
+# Below this average box score = no text.
 MIN_TEXT_DETECTION_SCORE = 0.70
 
 
 class UnsupportedScriptError(Exception):
-    """Raised when the menu seems to be in a script the OCR can't read,
-    like Khmer or Burmese. `lines` keeps whatever text was read anyway."""
+    """The text is in a script we can't read (like Khmer or Burmese).
+    `lines` keeps whatever could still be read.
+    """
 
     def __init__(self, message=UNSUPPORTED_SCRIPT_MESSAGE, lines=None):
         super().__init__(message)
         self.lines = lines or []
 
 
-# The script each non-Latin model is supposed to read
+# The script each non-Latin model should find
 SCRIPT_BY_LANGUAGE = {
     "korean": HANGUL_RANGE,
     "th": THAI_RANGE,
@@ -253,31 +237,28 @@ SCRIPT_BY_LANGUAGE = {
 
 
 def _print_timing(message):
-    # print() instead of the logger so it always shows in the terminal,
-    # even when Flask isn't running in debug mode.
+    # print() so it always shows in the terminal, even without debug mode
     print(f"[CuiSync] {message}", flush=True)
 
 
 def get_logger():
-    # Use Flask's logger inside a request, otherwise the normal one.
+    # Flask's logger inside a request, the normal one outside
     if has_app_context():
         from flask import current_app
         return current_app.logger
     return logger
 
 
-# --- Running OCR ------------------------------------------------------
-# How a menu photo is read:
-#   1. Find where the text is (one detection model, run once).
-#   2. Quick language check: read only the few longest lines with every
-#      model and keep the language that reads them best.
-#   3. Read all the lines with just that model.
-# Reading is the slow part (about 2 seconds per model for a whole menu),
-# so this is much faster than reading the whole menu with every model.
+# --- Running OCR ---
+# 1. Find where the text is (one detection model).
+# 2. Read the widest lines with every model and pick the best language.
+# 3. Read all the lines with only that model.
+# Reading is the slow part (about 2s per model), so this is way faster than using every model.
 
 def prepare_ocr_image(image, max_side=1600):
-    """Shrink big photos before OCR. Phone pictures can be 4000px+ wide,
-    which is slow and doesn't help accuracy. Smaller images are left as is."""
+    """Shrink big photos before OCR. Phone photos can be 4000px+, which is slow
+    and doesn't help. Small images are left alone.
+    """
     if image is None:
         raise ValueError("OCR image is None.")
     if not isinstance(image, np.ndarray):
@@ -299,27 +280,26 @@ def prepare_ocr_image(image, max_side=1600):
     return cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
 
 
-# Settings shared by every model
-# enable_mkldnn=False: on Linux servers with Intel/AMD CPUs (like the Hugging
-# Face Space), Paddle 3.3's MKLDNN speed-up crashes with "ConvertPirAttribute2
-# RuntimeAttribute not support". Macs don't use MKLDNN, so this changes nothing there.
+# Settings for every model. enable_mkldnn=False because MKLDNN crashes Paddle 3.3
+# on Linux servers like the Hugging Face Space. Macs don't use it anyway.
 _COMMON_MODEL_KWARGS = dict(engine="paddle_static", enable_mkldnn=False)
 
 _DETECTOR = None
-_RECOGNIZERS = {}            # model name -> loaded model
+_RECOGNIZERS = {}  # model name -> loaded model
 _MODEL_LOCK = threading.Lock()
 
-# PaddleOCR's own helpers: put boxes in reading order, then cut out each line
+# PaddleOCR helpers: sort boxes in reading order, then cut out each line
 if not OCR_API_URL:
     _sort_boxes = SortQuadBoxes()
     _crop_by_polys = CropByPolys(det_box_type="quad")
 
 
-# --- Remote OCR (Hugging Face Space) ----------------------------------
+# --- Remote OCR (Hugging Face Space) ---
 
 def _remote_request(method, path, **kwargs):
-    """Call the OCR Space. While the Space is waking up it answers with
-    errors like 503, so keep trying until OCR_API_TIMEOUT runs out."""
+    """Call the OCR Space. While it's waking up it returns 503 errors,
+    so keep retrying until OCR_API_TIMEOUT runs out.
+    """
 
     headers = {"Authorization": f"Bearer {OCR_API_TOKEN}"} if OCR_API_TOKEN else {}
     deadline = time.monotonic() + OCR_API_TIMEOUT
@@ -342,10 +322,10 @@ def _remote_request(method, path, **kwargs):
 
 
 def _remote_ocr(image, country=""):
-    """Send the photo to the OCR Space and get back the lines it read."""
+    """Send the photo to the Space and get back the lines it read."""
     start_time = time.perf_counter()
     image = prepare_ocr_image(image)
-    ok, encoded = cv2.imencode(".png", image)  # PNG: no quality loss
+    ok, encoded = cv2.imencode(".png", image)  # PNG so no quality is lost
     if not ok:
         raise ValueError("Could not encode the image for the OCR service.")
 
@@ -364,7 +344,7 @@ def _remote_ocr(image, country=""):
 
 
 def _get_detector():
-    """The text detection model, loaded the first time it's needed."""
+    """The detection model, loaded the first time it's needed."""
     global _DETECTOR
     if _DETECTOR is None:
         with _MODEL_LOCK:
@@ -383,8 +363,9 @@ def _get_detector():
 
 
 def _get_recognizer(model_name):
-    """A text recognition model, loaded the first time it's needed.
-    Languages that share a model also share the loaded copy."""
+    """A recognition model, loaded the first time it's needed.
+    Languages that share a model share the same loaded copy.
+    """
     recognizer = _RECOGNIZERS.get(model_name)
     if recognizer is None:
         with _MODEL_LOCK:
@@ -397,13 +378,11 @@ def _get_recognizer(model_name):
 
 
 def warm_up():
-    """Load every OCR model and run each once on a blank image.
+    """Load every model and run each once on a blank image.
 
-    Loading takes a while (around 20+ seconds for all of them), so app.py
-    calls this in the background when the app starts. That way the first
-    upload doesn't have to wait for it.
-
-    In remote mode it just wakes the OCR Space up instead."""
+    Loading takes 20+ seconds, so app.py runs this in the background at startup
+    and the first upload doesn't have to wait. On Render it just wakes up the Space.
+    """
     start_time = time.perf_counter()
     if OCR_API_URL:
         try:
@@ -424,8 +403,7 @@ def warm_up():
 
 
 def find_text_lines_with_scores(image):
-    """Like find_text_lines, but also returns the detector's score for
-    each box (how sure it is that the box is text)."""
+    """Like find_text_lines, but also returns the detector's score for each box."""
     result = next(iter(_get_detector().predict(image)), None)
     if result is None or len(result["dt_polys"]) == 0:
         return [], []
@@ -441,20 +419,20 @@ def find_text_lines_with_scores(image):
 
 
 def find_text_lines(image):
-    """Find the text on the photo and cut out each line as its own small
-    image, in reading order (top to bottom, left to right)."""
+    """Find the text and cut out each line as a small image, in reading order."""
     crops, _ = find_text_lines_with_scores(image)
     return crops
 
 
 def read_lines(crops, model_name):
     """Read every cropped line with one model.
-    Returns a (text, confidence) pair for each line, in the same order."""
+    Returns a (text, confidence) pair for each line, in the same order.
+    """
     if not crops:
         return []
 
-    # Lines of similar shape are faster to read together, so sort them
-    # by width/height first and put the results back in order after.
+    # Lines with a similar shape read faster together, so sort by width/height
+    # and put the results back in order after
     order = sorted(range(len(crops)), key=lambda i: crops[i].shape[1] / float(crops[i].shape[0]))
     results = [("", 0.0)] * len(crops)
 
@@ -468,20 +446,20 @@ def read_lines(crops, model_name):
 
 
 def _good_lines(readings):
-    """The lines worth keeping, plus the confidence of every line (empty
-    ones count as 0) for the unsupported-script check."""
+    """The lines worth keeping, plus every line's confidence (empty = 0)
+    for the unsupported-script check.
+    """
     lines = [text for text, score in readings if text and score >= MIN_LINE_CONFIDENCE]
     scores = [score if text else 0.0 for text, score in readings]
     return lines, scores
 
 
 def ocr_quality(lines, scores, language=""):
-    """Score how good one language's OCR result is, so we can pick the best one.
+    """Score how good one language's result is, so we can pick the best one.
 
-    The base score is the amount of text read, weighted by confidence.
-    Then it's adjusted depending on whether the text is actually in the
-    script that model is made for. For example, the Korean model only
-    gets a bonus if it really found Korean letters.
+    Base score = amount of text read x confidence. Then it goes up or down
+    depending on whether the model found its own script (the Korean model only
+    gets a bonus if it really found Korean letters).
     """
     base = sum(max(score, 0.0) * len(line) for line, score in zip(lines, scores))
 
@@ -499,7 +477,7 @@ def ocr_quality(lines, scores, language=""):
         if has_cjk and not has_kana:
             base *= 1.8
         elif has_kana:
-            # Kana means it's Japanese, so the Japanese model should win
+            # Kana means Japanese, so the Japanese model should win
             base *= SCRIPT_MISMATCH_PENALTY
         elif not has_cjk:
             base *= SCRIPT_MISMATCH_PENALTY
@@ -512,12 +490,12 @@ def ocr_quality(lines, scores, language=""):
             base *= SCRIPT_MISMATCH_PENALTY
 
     elif language in ("vi", "tr"):
-        # Vietnamese and Turkish have lots of accented letters
+        # Vietnamese and Turkish have lots of accents
         if LATIN_DIACRITIC_RANGE.search(full_text):
             base *= 1.3
 
     elif language == "en":
-        # Small edge so English wins ties on plain English text
+        # Small boost so English wins ties
         base *= 1.05
 
     return base
@@ -528,7 +506,7 @@ def _average(values):
 
 
 def looks_like_no_text(lines, box_scores, det_scores):
-    """True when the photo most likely has no real text in it."""
+    """True if the photo most likely has no real text."""
     full_text = "".join(lines)
     if KHMER_RANGE.search(full_text) or MYANMAR_RANGE.search(full_text):
         return False
@@ -540,11 +518,11 @@ def looks_like_no_text(lines, box_scores, det_scores):
         f"({len(det_scores)} boxes)"
     )
 
-    # The text was read fine, so it's real text
+    # Read fine, so it's real text
     if best_average >= MIN_READABLE_CONFIDENCE:
         return False
 
-    # No detector scores available: let the unsupported-script check decide
+    # No detector scores, let the unsupported-script check decide
     if not det_scores:
         return False
 
@@ -552,11 +530,9 @@ def looks_like_no_text(lines, box_scores, det_scores):
 
 
 def check_supported_script(lines, box_scores):
-    """Raise UnsupportedScriptError if the menu looks like Khmer or Burmese.
-
-    box_scores holds, for each model that ran, the confidence of every text
-    box it found. If text was found but even the best model was mostly
-    guessing, the script is one we can't read."""
+    """Raise UnsupportedScriptError if the text looks like Khmer or Burmese,
+    or if text was found but even the best model was just guessing.
+    """
     full_text = "".join(lines)
     if KHMER_RANGE.search(full_text) or MYANMAR_RANGE.search(full_text):
         raise UnsupportedScriptError(lines=lines)
@@ -570,9 +546,9 @@ def check_supported_script(lines, box_scores):
 
 
 def _pick_language(crops):
-    """The quick language check. Reads the few longest lines with every
-    model and returns the language whose result scores best, plus each
-    model's confidences (used to spot Khmer / Burmese early)."""
+    """The quick language check. Reads the widest lines with every model and
+    returns the best language, plus each model's confidences.
+    """
     probe = sorted(crops, key=lambda crop: crop.shape[1], reverse=True)[:PROBE_LINES]
 
     model_groups = {}
@@ -592,8 +568,7 @@ def _pick_language(crops):
         scores_per_model.append(scores)
         kept_scores = [score for score in scores if score >= MIN_LINE_CONFIDENCE]
 
-        # Languages sharing a model read the same text, but are scored a
-        # bit differently (e.g. accented letters favour vi / tr)
+        # Languages sharing a model read the same text but get scored a bit differently
         for language in languages:
             score = ocr_quality(lines, kept_scores, language)
             if score > best_score:
@@ -603,8 +578,7 @@ def _pick_language(crops):
 
 
 def _model_script(model_name):
-    """The script a non-Latin recognition model is made for (None for the
-    English / Latin models)."""
+    """The script a non-Latin model is made for (None for English/Latin)."""
     if model_name == PP_OCRV5_REC_MODELS["ch"]:
         return re.compile(f"{CJK_RANGE.pattern}|{KANA_RANGE.pattern}")
     for language, script in SCRIPT_BY_LANGUAGE.items():
@@ -614,20 +588,18 @@ def _model_script(model_name):
 
 
 def read_lines_with_reread(crops, model_name):
-    """Read every line with the chosen model, then fix lines that may be in
-    a different script from the rest of the page:
+    """Read every line with the chosen model, then fix lines in a different script:
 
-    1. Lines the chosen model is unsure about are re-read by every other
-       model, and the most confident reading is kept.
-    2. If the chosen model is an English/Latin one, short lines (likely dish
-       names) are also re-read by the non-Latin models. A reading is kept
-       only if that model is sure and its own script really shows up, e.g.
-       the Korean model reading Korean letters.
+    1. Unsure lines are re-read by every other model, the most confident reading wins.
+    2. If the model is English/Latin, short lines (likely dish names) are also re-read
+       by the non-Latin models, and kept only if that model is sure and finds its
+       own script (like the Korean model reading Korean letters).
 
-    Returns (text, confidence) pairs like read_lines."""
+    Returns (text, confidence) pairs like read_lines.
+    """
     readings = read_lines(crops, model_name)
 
-    # DEBUG (temporary): show what the chosen model read on each line
+    # DEBUG (temporary): what the model read on each line
     _print_timing(f"[debug] model={model_name}, {len(readings)} lines")
     for i, (text, score) in enumerate(readings):
         _print_timing(f"[debug]   line {i}: {score:.2f}  {text!r}")
@@ -657,7 +629,7 @@ def read_lines_with_reread(crops, model_name):
             continue
         script = _model_script(other_model)
         if script is None and not unsure:
-            continue   # Latin models only help with the unsure lines
+            continue  # Latin models only help with the unsure lines
         try:
             results = read_lines(reread_crops, other_model)
         except Exception:
@@ -684,7 +656,7 @@ def read_lines_with_reread(crops, model_name):
 
 
 def _model_script_text(text):
-    """Which non-Latin script a piece of text is in (None if Latin only)."""
+    """Which non-Latin script the text is in (None if Latin only)."""
     for pattern in (CJK_RANGE, KANA_RANGE, HANGUL_RANGE, THAI_RANGE,
                     ARABIC_RANGE, DEVANAGARI_RANGE):
         if pattern.search(text):
@@ -693,14 +665,12 @@ def _model_script_text(text):
 
 
 def _second_latin_reading(best_lines, crops):
-    """Extra lines for accented Latin menus (Vietnamese mostly), read by
-    the Chinese model.
+    """Extra lines for accented Latin menus (mostly Vietnamese), read by the Chinese model.
 
-    Neither the Latin nor the Chinese model knows Vietnamese letters with
-    stacked accents (ở, ố, ế, ộ...). The Latin model just drops them
-    ("Phở" -> "Ph") but the Chinese model swaps in a look-alike ("Phó"),
-    which romanizes to the right spelling. Lines that come out the same as
-    the first reading are skipped."""
+    The Latin model drops stacked accents ("Phở" -> "Ph") but the Chinese model
+    swaps in a look-alike ("Phó"), which romanizes to the right spelling.
+    Lines that are the same as the first reading are skipped.
+    """
     lines, _ = _good_lines(read_lines(crops, PP_OCRV5_REC_MODELS["ch"]))
     seen = {match_key(line) for line in best_lines}
     extra = []
@@ -717,11 +687,10 @@ def _second_latin_reading(best_lines, crops):
 
 
 def rescue_readable_lines(crops):
-    """Used only when the main text can't be read (Khmer, Burmese...).
-    Reads every line with every model and keeps the lines that at least one
-    model read with confidence REREAD_CONFIDENCE or more, in reading order.
-    Lines in an unsupported script stay below it, so only readable lines
-    (e.g. an English dish name) are kept."""
+    """Only used when the main text can't be read (Khmer, Burmese...).
+    Reads every line with every model and keeps the lines some model read
+    with 0.70+ confidence (like an English dish name), in reading order.
+    """
     start_time = time.perf_counter()
     crops = crops[:MAX_CANDIDATE_LINES]
     best = [("", 0.0)] * len(crops)
@@ -745,8 +714,9 @@ def rescue_readable_lines(crops):
 
 
 def automatic_ocr(image):
-    """Read the menu when we don't know the country (see the steps at the
-    top of this section). Returns the lines of text that were read."""
+    """Read the menu when we don't know the country.
+    Returns the lines of text that were read.
+    """
     if OCR_API_URL:
         return _remote_ocr(image)
     start_time = time.perf_counter()
@@ -759,14 +729,13 @@ def automatic_ocr(image):
 
     language, probe_scores, probe_lines = _pick_language(crops)
 
-    # No real text in the photo: app.py shows the "No Text Detected" popup
+    # No real text, app.py shows "No Text Detected"
     if looks_like_no_text(probe_lines, probe_scores, det_scores):
         _print_timing(f"OCR finished in {time.perf_counter() - start_time:.2f}s (no text found)")
         return []
 
-    # Stop early with a clear error if it's Khmer, Burmese or unreadable.
-    # Before giving up, rescue any line that some model CAN read (e.g. a
-    # small English "Fish Amok" on a Khmer menu), so app.py can still match it.
+    # Khmer, Burmese or unreadable: stop here. But first save any line some model
+    # can read (like an English "Fish Amok" on a Khmer menu) so it can still match.
     try:
         check_supported_script(probe_lines, probe_scores)
     except UnsupportedScriptError:
@@ -775,8 +744,8 @@ def automatic_ocr(image):
 
     lines, scores = _good_lines(read_lines_with_reread(crops, PP_OCRV5_REC_MODELS[language]))
 
-    # Accented Latin text (Vietnamese, Turkish): also keep the Chinese
-    # model's reading, it handles some accents the Latin model drops
+    # Vietnamese/Turkish: also add the Chinese model's reading,
+    # it keeps some accents the Latin model drops
     if language in LATIN_LANGUAGES and LATIN_DIACRITIC_RANGE.search("".join(lines)):
         lines = lines + _second_latin_reading(lines, crops)
 
@@ -791,8 +760,9 @@ def automatic_ocr(image):
 
 
 def automatic_ocr_for_country(image, country):
-    """Faster option when the country is already known: only that
-    country's model reads the menu (English if the country isn't listed)."""
+    """Faster version when the country is known: only that country's model
+    reads the menu (English if the country isn't listed).
+    """
     if OCR_API_URL:
         return _remote_ocr(image, country)
     start_time = time.perf_counter()
@@ -804,8 +774,7 @@ def automatic_ocr_for_country(image, country):
     try:
         crops = find_text_lines(image)
         lines, scores = _good_lines(read_lines_with_reread(crops, PP_OCRV5_REC_MODELS[language]))
-        # Same as automatic_ocr: accented Latin text (Vietnamese, Turkish) also
-        # gets the Chinese model's reading, which keeps some accents
+        # Same as automatic_ocr: Vietnamese/Turkish also get the Chinese model's reading
         if language in LATIN_LANGUAGES and LATIN_DIACRITIC_RANGE.search("".join(lines)):
             lines = lines + _second_latin_reading(lines, crops)
     except Exception:
@@ -823,12 +792,12 @@ def automatic_ocr_for_country(image, country):
     return lines
 
 
-# --- Romanization -----------------------------------------------------
-# Turns non-Latin text into Latin letters so it can be compared with the
-# dataset names. It doesn't translate: 红烧肉 becomes "Hong Shao Rou".
+# --- Romanization ---
+# Turns other scripts into Latin letters so they can be compared with the dataset.
+# It doesn't translate: 红烧肉 becomes "Hong Shao Rou".
 
 def romanize_japanese(text):
-    """Japanese kanji/kana to Hepburn romaji (e.g. ラーメン -> raamen)."""
+    """Japanese to Hepburn romaji (like ラーメン -> raamen)."""
     if not _kakasi:
         return str(text)
 
@@ -844,29 +813,28 @@ THAI_TONE_MARKS = re.compile(r"[\u0E48-\u0E4C]")
 
 
 def romanize_thai(text):
-    """Thai to Latin letters using the official Thai system (RTGS),
-    e.g. ไก่ย่างขมิ้น -> "kaiyang khmin".
+    """Thai to Latin letters with the official Thai system (RTGS),
+    like ไก่ย่างขมิ้น -> "kaiyang khmin".
 
-    Thai has no spaces between words, so we split it into words first.
-    Tone marks are removed after splitting because they don't change the
-    spelling, and the romanizer makes mistakes on words that have them."""
+    Thai has no spaces, so split it into words first. Tone marks are removed
+    because they don't change the spelling and they confuse the romanizer.
+    """
     words = _thai_word_tokenize(text, keep_whitespace=False)
     return " ".join(_thai_romanize(THAI_TONE_MARKS.sub("", word), engine="royin") for word in words)
 
 
 @lru_cache(maxsize=8192)
 def romanize_text(text, mode="standard"):
-    """Romanize one piece of text. mode="japanese" uses Japanese readings
-    for kanji instead of Chinese pinyin."""
+    """Romanize one piece of text. mode="japanese" uses Japanese readings for kanji
+    instead of Chinese pinyin.
+    """
     text = str(text)
 
     try:
         if DEVANAGARI_RANGE.search(text):
             text = transliterate(text, sanscript.DEVANAGARI, sanscript.ITRANS)
-            # ITRANS writes the silent "a" at the end of Hindi words
-            # (गाजर -> "gAjara"), but nobody says it and the dataset doesn't
-            # spell it ("Gajar"). A long a is a capital "A" in ITRANS, so a
-            # small "a" after a consonant at the end of a word is always silent.
+            # ITRANS adds a silent "a" at the end of Hindi words (गाजर -> "gAjara"),
+            # but the dataset spells it "Gajar", so remove a small "a" after a consonant at the end
             text = re.sub(r"(?<=[b-df-hj-np-tv-z])a(?=\s|$)", "", text)
         elif mode == "japanese" and _kakasi:
             text = romanize_japanese(text)
@@ -881,9 +849,9 @@ def romanize_text(text, mode="standard"):
 
 
 class RomanizedLine(str):
-    """A romanized line that still remembers which script it came from
-    ("th" for Thai, "ar" for Arabic, otherwise None). Works like a normal
-    string everywhere else."""
+    """A romanized line that remembers its script ("th", "ar" or None).
+    Works like a normal string everywhere else.
+    """
     script = None
 
 
@@ -903,7 +871,8 @@ def _tag(text, script):
 
 def romanize_lines(lines):
     """Romanize all OCR lines. Chinese/Japanese text gets two versions
-    (pinyin and Japanese romaji) since kanji can be read either way."""
+    (pinyin and romaji) since kanji can be read both ways.
+    """
     clean_lines = [str(line).strip() for line in lines if str(line).strip()]
     romanized_std = [
         _tag(romanize_text(line, mode="standard"), _line_script(line))
@@ -928,19 +897,21 @@ def romanize_lines(lines):
     return romanized_std
 
 
-# --- Matching OCR text to recipes -------------------------------------
+# --- Matching OCR text to recipes ---
 
 @lru_cache(maxsize=16384)
 def match_key(text, mode="standard"):
-    """Simplify a name for comparing: lowercase, no spaces, accents or
-    punctuation. "Kare-Kare" and "kare kare" both become "karekare"."""
+    """Simplify a name for comparing: lowercase, no spaces, accents or punctuation.
+    "Kare-Kare" and "kare kare" both become "karekare".
+    """
     romanized = romanize_text(text, mode=mode)
     return re.sub(r"[^a-z0-9]+", "", romanized.casefold())
 
 
 def clean_menu_line(line):
-    """Remove prices and dot leaders from a menu line,
-    e.g. "Chicken Adobo ..... P150.00" -> "Chicken Adobo"."""
+    """Remove prices and dots from a menu line,
+    like "Chicken Adobo ..... P150.00" -> "Chicken Adobo".
+    """
     line = str(line)
 
     # Numbers and currency symbols (peso, dollar, euro, yen, pound, won, baht)
@@ -953,9 +924,9 @@ def clean_menu_line(line):
 
 
 def menu_candidates(romanized_lines):
-    """Possible dish names from the menu. Each line counts on its own, and
-    up to MAX_JOINED_LINES lines in a row are also joined together, in case
-    a long name wrapped onto the next line ("Chicken" / "Adobo")."""
+    """Possible dish names on the menu. Each line counts on its own, and up to
+    MAX_JOINED_LINES lines in a row are also joined (for names that wrap onto the next line).
+    """
     raw_keys = []
 
     for line in romanized_lines:
@@ -976,7 +947,7 @@ def menu_candidates(romanized_lines):
     raw_keys = raw_keys[:MAX_CANDIDATE_LINES]
     candidates = set(raw_keys)
 
-    # Join lines that come one after another (for wrapped names)
+    # Join lines in a row (for names that wrap)
     for start in range(len(raw_keys)):
         joined = raw_keys[start]
         for end in range(start + 1, min(start + MAX_JOINED_LINES, len(raw_keys))):
@@ -987,13 +958,11 @@ def menu_candidates(romanized_lines):
 
 
 def loose_key(text, script):
-    """A "sounds-alike" version of a name for Thai and Arabic.
+    """A "sounds-alike" version of a Thai or Arabic name.
 
-    The dataset spells these names the casual English way ("Gai", "Pad",
-    "Baqsam"), but the romanizer can't: Thai comes out in the official
-    system ("kai", "phat") and Arabic has no written short vowels, so
-    بقسم is only "bqsm". So we drop the vowels, treat letters that sound
-    alike as the same, and squash double letters:
+    The dataset spells these the casual way ("Gai", "Baqsam") but the romanizer doesn't
+    ("kai", and Arabic has no short vowels so بقسم is just "bqsm"). So drop the vowels,
+    treat letters that sound alike as the same, and squash double letters:
         "Gai Yang Khamin" and "kaiyang khmin" -> "kynkmn"
         "Baqsam" and "bqsm"                   -> "bksm"
     """
@@ -1008,7 +977,7 @@ def loose_key(text, script):
         for a, b in (("q", "k"), ("g", "k"), ("kh", "k"), ("th", "t"),
                      ("dh", "d"), ("sh", "s")):
             key = key.replace(a, b)
-        # w and y are usually long vowels in Arabic, so drop them as well
+        # w and y are usually long vowels in Arabic, so drop them too
         key = re.sub(r"[aeiouwy]", "", key)
 
     return re.sub(r"(.)\1+", r"\1", key)
@@ -1016,9 +985,10 @@ def loose_key(text, script):
 
 def loose_candidates(romanized_lines):
     """Sounds-alike keys for the Thai and Arabic lines, grouped by script.
-    Like menu_candidates(), lines in a row are also joined together."""
+    Lines in a row are joined too, like menu_candidates().
+    """
     by_script = {}
-    previous = []   # (script, key) of the lines just before this one
+    previous = []  # (script, key) of the previous lines
 
     for line in list(romanized_lines)[:MAX_CANDIDATE_LINES]:
         script = getattr(line, "script", None)
@@ -1057,8 +1027,9 @@ def is_loose_match(name_key, loose_keys):
 
 
 def _single_line_keys(romanized_lines):
-    """The keys of each menu line on its own (not joined with others),
-    in the same forms find_recipes() stores in "_matched"."""
+    """Keys of each menu line on its own (not joined), in the same form
+    find_recipes() stores in "_matched".
+    """
     keys = set()
     for line in list(romanized_lines)[:MAX_CANDIDATE_LINES]:
         text = clean_menu_line(line)
@@ -1074,8 +1045,9 @@ def _single_line_keys(romanized_lines):
 
 
 def build_candidate_index(candidate_keys):
-    """Set the candidates up for fast lookup: a set for exact matches, and
-    a dict grouped by length so typo checks only compare similar-length names."""
+    """Set up the candidates for fast lookup: a set for exact matches and
+    a dict by length so typo checks only compare names of similar length.
+    """
     candidate_set = set(candidate_keys)
 
     length_buckets = {}
@@ -1086,13 +1058,10 @@ def build_candidate_index(candidate_keys):
 
 
 def is_recipe_match(title_key, candidate_set, length_buckets):
-    """Check if any menu line is this recipe's name. Returns the matching
-    line, or None.
+    """Check if a menu line is this recipe's name. Returns that line, or None.
 
-    The whole line has to be the dish name. A dish doesn't count just
-    because its name appears inside a longer line, otherwise "Pork Adobo"
-    (not in the dataset) would match the dish called "Pork". Small OCR
-    typos are allowed for longer names only.
+    The whole line has to be the dish name, otherwise "Pork Adobo" would match
+    a dish called "Pork". Small typos are only allowed for longer names.
     """
     if not title_key:
         return None
@@ -1101,7 +1070,7 @@ def is_recipe_match(title_key, candidate_set, length_buckets):
     if title_key in candidate_set:
         return title_key
 
-    # Short names have to be exact, a 1-letter typo could be another dish
+    # Short names must be exact, 1 wrong letter could be another dish
     if len(title_key) < FUZZY_MIN_LEN:
         return None
 
@@ -1119,8 +1088,9 @@ def is_recipe_match(title_key, candidate_set, length_buckets):
 
 
 def edit_distance(a, b, limit):
-    """How many letters must be added, removed or changed to turn a into b.
-    Stops early once it's clearly more than `limit`, since that's all we need."""
+    """How many letters to add, remove or change to turn a into b.
+    Stops early once it's over `limit`, since that's all we need to know.
+    """
     if abs(len(a) - len(b)) > limit:
         return limit + 1
 
@@ -1130,9 +1100,9 @@ def edit_distance(a, b, limit):
         current = [i]
         for j, char_b in enumerate(b, 1):
             current.append(min(
-                previous[j] + 1,                        # remove a letter
-                current[j - 1] + 1,                     # add a letter
-                previous[j - 1] + (char_a != char_b),   # change a letter
+                previous[j] + 1,  # remove a letter
+                current[j - 1] + 1,  # add a letter
+                previous[j - 1] + (char_a != char_b),  # change a letter
             ))
 
         if min(current) > limit:
@@ -1145,8 +1115,9 @@ def edit_distance(a, b, limit):
 
 @lru_cache(maxsize=16384)
 def title_key_variants(title, alternative_title="", country=""):
-    """All the ways a recipe can be matched: its title and its alternative
-    title, plus Japanese readings for Japanese recipes."""
+    """All the ways a recipe can be matched: its title and alternative title,
+    plus Japanese readings for Japanese recipes.
+    """
     is_japan = (country or "").strip().lower() in ("japan", "japanese")
 
     raw_names = [title, alternative_title]
@@ -1172,8 +1143,7 @@ def title_key_variants(title, alternative_title="", country=""):
 
 
 def find_recipes(romanized_lines, origin_country="", recipes=None):
-    """Find the dataset recipes whose names appear on the menu.
-    Also prints how long the search took."""
+    """Find the recipes whose names are on the menu, and print how long it took."""
     start_time = time.perf_counter()
     result = _find_recipes(romanized_lines, origin_country, recipes)
 
@@ -1199,7 +1169,7 @@ def _find_recipes(romanized_lines, origin_country, recipes):
     matches = []
     seen = set()
 
-    # Only look at recipes from the chosen country (or all if none chosen)
+    # Only recipes from the chosen country (or all if none)
     filtered_recipes = []
     for recipe in recipes:
         title = (recipe.get("title", "") or "").strip()
@@ -1221,7 +1191,7 @@ def _find_recipes(romanized_lines, origin_country, recipes):
         if not title_keys:
             continue
 
-        # First menu line that matches any version of this recipe's name
+        # First menu line that matches any name of this recipe
         matched_candidate = next(
             (
                 candidate
@@ -1242,13 +1212,13 @@ def _find_recipes(romanized_lines, origin_country, recipes):
                 alt_key = loose_key(recipe.get("alternative_title", "") or "", script)
                 hit = is_loose_match(alt_key, loose_keys)
                 if hit:
-                    matched_candidate = "~" + hit   # "~" keeps these apart from normal keys
+                    matched_candidate = "~" + hit  # "~" keeps these apart from normal keys
                     break
 
         if not matched_candidate:
             continue
 
-        # Skip duplicate recipes (same title and country)
+        # Skip duplicates (same title and country)
         identity = (title.casefold(), country.casefold())
         if identity in seen:
             continue
@@ -1262,10 +1232,9 @@ def _find_recipes(romanized_lines, origin_country, recipes):
         })
         seen.add(identity)
 
-    # If "Chicken" / "Adobo" on two lines matched "Chicken Adobo", drop
-    # the dishes that only matched one piece of it (like "Chicken").
-    # Only for names joined from several lines: if "Udon" and "Miso Udon"
-    # are both their own lines on the menu, both are real dishes.
+    # If "Chicken" / "Adobo" on two lines matched "Chicken Adobo", drop dishes that only
+    # matched a piece of it (like "Chicken"). Only for joined lines: if "Udon" and
+    # "Miso Udon" are both their own lines, both are real dishes.
     single_lines = _single_line_keys(romanized_lines)
     result = []
     for match in matches:
@@ -1280,7 +1249,7 @@ def _find_recipes(romanized_lines, origin_country, recipes):
         if not is_redundant:
             result.append(match)
 
-    # Remove the helper key only after all the comparisons above are done
+    # Remove the helper key only after all the comparisons are done
     for match in result:
         match.pop("_matched", None)
 

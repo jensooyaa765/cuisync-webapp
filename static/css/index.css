@@ -627,6 +627,10 @@ hr {
 .form-group select {
   width: 100%;
   padding: 12px 16px;
+  /* Set the font here, phones make select text bigger by default */
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.4;
   background-color: var(--cream-bg);
   border: 1px solid rgba(74, 74, 74, 0.407);
   border-radius: 6px;
@@ -641,8 +645,7 @@ hr {
   transition: border-color 0.2s ease;
 }
 
-/* While the placeholder ("Select ...") is showing, grey it out like the
-   dish-name placeholder. Works because the selects are required. */
+/* Grey out "Select ..." like the dish-name placeholder (works since the selects are required) */
 .form-group select:invalid {
   color: #9e9488;
 }
@@ -651,22 +654,21 @@ hr {
   border-color: var(--gold-accent, #c8a860);
 }
 
-/* Country of origin on the image tab: same box as the selects, but it's
-   only a display (no arrow, can't be clicked open). */
+/* Country of origin on the image tab: looks like the selects but can't be opened */
 .origin-select-hidden {
   display: none !important;
 }
 
 .origin-display {
   width: 100%;
-  padding: 11.5px 16px;
+  padding: 12px 16px;
   background-color: var(--cream-bg);
   border: 1px solid rgba(74, 74, 74, 0.407);
   border-radius: 6px;
   color: var(--text-dark);
   font: inherit;
-  font-size: 13.3333px;   /* same size the browser gives the selects */
-  line-height: normal;
+  font-size: 0.82rem;     /* same as the selects */
+  line-height: 1.4;
   cursor: default;
   user-select: none;
   white-space: nowrap;
@@ -674,8 +676,10 @@ hr {
   text-overflow: ellipsis;
 }
 
+/* Same look as the dish-name placeholder ("Example: Pho, Adobo, Ramen") */
 .origin-display.is-placeholder {
-  color: var(--text-muted);
+  color: #9e9488;
+  font-weight: 400;
 }
 
 .origin-display.is-scanning {
@@ -897,18 +901,18 @@ hr {
     gap: 0;
   }
 
-  /* Country selects on mobile: compact text and box.
-     The image-tab origin box matches them. */
+  /* Country boxes on mobile. Selects are forced to 16px in base-style.css
+     (so iPhones don't zoom), so the origin box uses 16px too. */
   .form-group select,
   .origin-display {
-    font-size: 0.75rem;
+    font-size: 16px;
     padding: 10px 36px 10px 14px;
     background-size: 14px;
   }
 
-  /* "Select country..." placeholder: same size as the dish-name placeholder */
-  .form-group select:invalid {
-    font-size: 0.82rem;
+  /* Dish-name placeholder, same size as the origin placeholder */
+  .form-group input::placeholder {
+    font-size: 16px;
   }
 
   .origin-display {
@@ -936,10 +940,8 @@ hr {
   }
 }
 
-/* Styles that used to be inline in index.html: the note under each dish-name suggestion
-   (.dropdown-alt) and the "similar enough?" warning pop-up. Linked AFTER index.css, so every
-   rule keeps the priority it had as an inline <style>. */
-/* "alternative name for ..." hint under a suggestion that matched an alternative_title */
+/* Moved here from index.html: the note under each dish suggestion and the low similarity popup */
+/* "alternative name for ..." note under a suggestion */
 .dropdown-item .dropdown-alt {
   display: block;
   margin-top: 2px;
@@ -948,7 +950,7 @@ hr {
   opacity: 0.65;
 }
 
-/* Low-similarity popup: shown on this page BEFORE any results load */
+/* Low similarity popup (shows before the results load) */
 .sim-warning-overlay {
   position: fixed;
   inset: 0;
