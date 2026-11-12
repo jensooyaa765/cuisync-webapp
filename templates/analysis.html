@@ -845,5 +845,51 @@
     });
   </script>
 
+  <script>
+    // Sub-navigation: highlight the section that is on screen (or was clicked)
+    document.addEventListener("DOMContentLoaded", () => {
+      const subnav = document.querySelector(".subnav-bar");
+      const links = document.querySelectorAll(".subnav-item");
+      const sections = [...links]
+        .map((link) => document.querySelector(link.getAttribute("href")))
+        .filter(Boolean);
+      let clickLockUntil = 0;
+
+      function setActive(id) {
+        links.forEach((link) => {
+          link.classList.toggle("active", link.getAttribute("href") === `#${id}`);
+        });
+      }
+
+      function updateActive() {
+        if (Date.now() < clickLockUntil || !sections.length) return;
+
+        // A section counts once its top passes just under the sticky bars
+        const line = (subnav ? subnav.getBoundingClientRect().bottom : 0) + 40;
+        let current = sections[0].id;
+        sections.forEach((section) => {
+          if (section.getBoundingClientRect().top <= line) current = section.id;
+        });
+
+        // At the bottom the last section may be too short to reach the line
+        const atBottom =
+          window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+        if (atBottom) current = sections[sections.length - 1].id;
+
+        setActive(current);
+      }
+
+      links.forEach((link) => {
+        link.addEventListener("click", () => {
+          setActive(link.getAttribute("href").slice(1));
+          clickLockUntil = Date.now() + 1000;
+        });
+      });
+
+      window.addEventListener("scroll", updateActive, { passive: true });
+      updateActive();
+    });
+  </script>
+
 </body>
 </html>

@@ -228,7 +228,25 @@
       const sections = document.querySelectorAll(".faq-group");
       const navLinks = document.querySelectorAll(".category-link");
 
+      function setActiveLink(id) {
+        navLinks.forEach((link) => {
+          link.classList.toggle("active", link.getAttribute("href") === `#${id}`);
+        });
+      }
+
+      // A clicked category stays highlighted while the page scrolls to it,
+      // even if its section is too short to reach the top of the screen
+      let clickLockUntil = 0;
+      navLinks.forEach((link) => {
+        link.addEventListener("click", () => {
+          setActiveLink(link.getAttribute("href").slice(1));
+          clickLockUntil = Date.now() + 1000;
+        });
+      });
+
       window.addEventListener("scroll", () => {
+        if (Date.now() < clickLockUntil) return;
+
         let current = "";
 
         sections.forEach((section) => {
@@ -238,12 +256,15 @@
           }
         });
 
-        navLinks.forEach((link) => {
-          link.classList.remove("active");
-          if (link.getAttribute("href") === `#${current}`) {
-            link.classList.add("active");
-          }
-        });
+        // At the very bottom the last section can't scroll up to the top,
+        // so mark it active when the page is scrolled all the way down
+        const atBottom =
+          window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+        if (atBottom && sections.length) {
+          current = sections[sections.length - 1].getAttribute("id");
+        }
+
+        setActiveLink(current);
       });
     });
   </script>
