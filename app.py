@@ -20,6 +20,7 @@ from softmatch import SoftMatcher
 from explainer import init as init_explainer, build_evidence, get_explanation
 from shapley import compute_shapley, influence_shares
 import accounts
+import ner
 import cultural_info
 import cuisync_prompts
 import explainer
@@ -74,6 +75,8 @@ def build_matcher():
 
 MATCHER = build_matcher()
 INGREDIENT_SEARCH = search_tools.IngredientSearch(MATCHER)
+# Ingredient NER for the admin dish form (ner.py: local model in ner_model/ or the NER Space)
+ner.init(app.root_path, MATCHER.items["ingredients"], MATCHER.items, RECIPES)
 
 # Gunicorn on Render skips __main__, so wake up the OCR Space here
 if ocr.OCR_API_URL and __name__ != "__main__":
@@ -173,7 +176,7 @@ accounts.init(STORE.data_dir)
 ADMIN_USERNAME = os.environ.get("CUISYNC_ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.environ.get("CUISYNC_ADMIN_PASSWORD", "cuisync-admin")
 if accounts.ensure_admin(ADMIN_USERNAME, ADMIN_PASSWORD):
-    print(f"[CuiSync] Admin account created: {ADMIN_USERNAME} / {ADMIN_PASSWORD} (change it on the Profile page)")
+    print(f"[CuiSync] Admin account created: {ADMIN_USERNAME} / {ADMIN_PASSWORD} (change it at /admin/account)")
 
 # GPT prompts the admin saved
 cuisync_prompts.set_system_prompt(STORE.get_prompt("explanation", ""))
@@ -192,6 +195,7 @@ def reload_data():
         RECIPES = STORE.recipes
         MATCHER = build_matcher()
         INGREDIENT_SEARCH = search_tools.IngredientSearch(MATCHER)
+        ner.init(app.root_path, MATCHER.items["ingredients"], MATCHER.items, RECIPES)
         feature_scores_for_source.cache_clear()
         init_explainer(RECIPES, parse_items)
     return STORE.missing_vectors
@@ -229,6 +233,20 @@ def admin_required(view):
 
 
 app.jinja_env.filters["fromjson"] = lambda text: json.loads(text or "{}")
+
+
+@app.before_request
+def keep_admins_in_admin():
+    """A logged-in admin only sees the admin pages: any page of the user site sends them to /admin."""
+    path = request.path
+    if path.startswith(("/admin", "/static/", "/logout")) or path in ("/login", "/favicon.ico"):
+        return None
+    user = current_user()
+    if user and user["is_admin"]:
+        if path.startswith("/api/"):
+            return jsonify({"error": "admin", "message": "Admins use the admin pages."}), 403
+        return redirect(url_for("admin_page"))
+    return None
 
 
 @app.context_processor
@@ -1013,6 +1031,9 @@ def _safe_next(target):
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    user = current_user()
+    if request.method == "GET" and user and user["is_admin"]:
+        return redirect(url_for("admin_page"))
     if request.method == "POST":
         user = accounts.authenticate(request.form.get("username"), request.form.get("password"))
         if user:
@@ -1020,9 +1041,11 @@ def login():
             session["user_id"] = user["id"]
             session.permanent = True
             flash(f"Welcome back, {user['name']}!", "success")
-            default = url_for("admin_page") if user["is_admin"] else url_for("home")
+            if user["is_admin"]:  # admins only use the admin pages
+                nxt = request.form.get("next") or ""
+                return redirect(nxt if nxt.startswith("/admin") and not nxt.startswith("//") else url_for("admin_page"))
             nxt = request.form.get("next")
-            return redirect(_safe_next(nxt) if nxt else default)
+            return redirect(_safe_next(nxt) if nxt else url_for("home"))
         flash("Wrong username or password.", "error")
     return render_template("auth.html", mode="login", next=request.args.get("next", ""))
 
@@ -1122,7 +1145,7 @@ def api_me():
     user = current_user()
     if not user:
         return jsonify({"logged_in": False})
-    return jsonify({"logged_in": True, "name": user["name"], "is_admin": user["is_admin"]})
+    return jsonify({"logged_in": True, "name": user["name"]})
 
 
 # ---------------- explore: keyword, ingredient and tag search (Galang 1, 4, 7; Oab 6) ----------------
@@ -1267,7 +1290,7 @@ def api_dish_info(idx):
 
 
 # ---------------- admin (Oab 1, 2, 5; Galang 3) ----------------
-ADMIN_TABS = ("overview", "dishes", "countries", "dataset", "prompts", "users")
+ADMIN_TABS = ("overview", "users", "dishes", "countries", "prompts", "tags", "dataset")
 
 
 @app.route("/admin")
@@ -1281,8 +1304,14 @@ def admin_page():
         per_country = {}
         for r in RECIPES:
             per_country[r["country"]] = per_country.get(r["country"], 0) + 1
+        per_day = accounts.searches_per_day(7)
+        most = max([n for _, n in per_day] + [1])
         ctx.update(stats=accounts.history_stats(), per_country=per_country, total=len(RECIPES),
-                   missing=STORE.missing_vectors, gpt_on=explainer._client is not None)
+                   missing=STORE.missing_vectors, gpt_on=explainer._client is not None,
+                   per_day=[{"label": d.strftime("%a"), "value": n, "height": round(100 * n / most)}
+                            for d, n in per_day],
+                   recent=accounts.recent_searches(6), ner_status=ner.status(),
+                   visible_countries=len(STORE.dropdown_countries()))
     elif tab == "dishes":
         q = request.args.get("q", "").strip()
         country = request.args.get("country", "").strip().upper()
@@ -1310,8 +1339,63 @@ def admin_page():
             gpt_on=explainer._client is not None,
         )
     elif tab == "users":
-        ctx.update(users=accounts.list_users(), me=current_user())
-    return render_template("admin.html", **ctx)
+        q = request.args.get("q", "").strip().lower()
+        role = request.args.get("role", "")
+        users = [u for u in accounts.list_users()
+                 if (not q or q in f"{u['username']} {u['name']}".lower()) and (not role or u["role"] == role)]
+        selected = None
+        if (request.args.get("user") or "").isdigit():
+            selected = accounts.get_user(int(request.args["user"]))
+            if selected:
+                selected["history"] = accounts.get_history(selected["id"], limit=5)
+                selected["searches"] = next((u["searches"] for u in accounts.list_users()
+                                             if u["id"] == selected["id"]), 0)
+        ctx.update(users=users, me=current_user(), q=q, role=role, selected=selected)
+    elif tab == "tags":
+        groups, _ = search_tools.all_tags(RECIPES, STORE.region_of)
+        custom = STORE.custom_tags()
+        q = request.args.get("q", "").strip().lower()
+        ctx.update(
+            q=q,
+            custom_tags=sorted(((t, n) for t, n in custom.items() if not q or q in t.lower()),
+                               key=lambda x: (-x[1], x[0])),
+            auto_groups={g: [(t, n) for t, n in ts if not q or q in t.lower()]
+                         for g, ts in groups.items() if g != "Custom"},
+            editing=request.args.get("edit", ""),
+        )
+    return render_template("admin/admin.html", **ctx)
+
+
+@app.route("/admin/login")
+def admin_login():
+    """Old address: admins use the same log in page as everyone."""
+    return redirect(url_for("login", next=request.args.get("next", "")))
+
+
+@app.route("/admin/logout", methods=["POST"])
+def admin_logout():
+    session.clear()
+    flash("You are logged out.", "info")
+    return redirect(url_for("login"))
+
+
+@app.route("/admin/tags/rename", methods=["POST"])
+@admin_required
+def admin_tag_rename():
+    try:
+        n = STORE.rename_tag(request.form.get("old"), request.form.get("new"))
+        flash(f'Tag renamed on {n} dish(es).', "success")
+    except ValueError as error:
+        flash(str(error), "error")
+    return redirect(url_for("admin_page", tab="tags"))
+
+
+@app.route("/admin/tags/delete", methods=["POST"])
+@admin_required
+def admin_tag_delete():
+    n = STORE.delete_tag(request.form.get("name"))
+    flash(f'Tag removed from {n} dish(es).', "success")
+    return redirect(url_for("admin_page", tab="tags"))
 
 
 def _after_data_change(message):
@@ -1347,8 +1431,34 @@ def admin_dish_form(recipe_id=None):
         except ValueError as error:
             flash(str(error), "error")
             dish = dict(request.form.items())
-    return render_template("admin_dish.html", dish=dish, recipe_id=recipe_id, fields=DISH_FIELDS,
-                           all_countries=STORE.countries, store=STORE, regions=REGION_CHOICES)
+    return render_template("admin/admin_dish.html", dish=dish, recipe_id=recipe_id, fields=DISH_FIELDS,
+                           all_countries=STORE.countries, store=STORE, regions=REGION_CHOICES,
+                           ner_status=ner.status())
+
+
+@app.route("/admin/api/extract-ingredients", methods=["POST"])
+@admin_required
+def admin_extract_ingredients():
+    """Admin pastes recipe text; the BERT NER model finds the ingredients (ner.py)."""
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"ingredients": ner.extract_and_match(str(data.get("text", "")))})
+    except ner.NerError as error:
+        return jsonify({"error": "ner_failed", "message": str(error)}), 400
+    except Exception as error:  # never show a raw crash to the admin
+        app.logger.exception("NER failed")
+        return jsonify({"error": "ner_failed", "message": f"Ingredient extraction failed: {error}"}), 500
+
+
+@app.route("/admin/api/extract-directions", methods=["POST"])
+@admin_required
+def admin_extract_directions():
+    """Admin pastes the directions; finds the cooking actions, cookware and utensils (ner.py)."""
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify(ner.extract_directions(str(data.get("text", ""))))
+    except ner.NerError as error:
+        return jsonify({"error": "extract_failed", "message": str(error)}), 400
 
 
 @app.route("/admin/dishes/<recipe_id>/delete", methods=["POST"])
@@ -1473,7 +1583,7 @@ def admin_user_role(user_id):
         flash("Role updated.", "success")
     except ValueError as error:
         flash(str(error), "error")
-    return redirect(url_for("admin_page", tab="users"))
+    return redirect(url_for("admin_page", tab="users", user=user_id))
 
 
 @app.route("/admin/users/<int:user_id>/delete", methods=["POST"])
@@ -1488,6 +1598,33 @@ def admin_user_delete(user_id):
         except ValueError as error:
             flash(str(error), "error")
     return redirect(url_for("admin_page", tab="users"))
+
+
+@app.route("/admin/account", methods=["GET", "POST"])
+@admin_required
+def admin_account():
+    """The admin's own name and password (so the admin never needs the public profile page)."""
+    user = current_user()
+    if request.method == "POST":
+        if request.form.get("action") == "password":
+            if request.form.get("new") != request.form.get("confirm"):
+                flash("The two new passwords don't match.", "error")
+            else:
+                try:
+                    accounts.change_password(user["id"], request.form.get("old"), request.form.get("new"))
+                    flash("Password changed.", "success")
+                except ValueError as error:
+                    flash(str(error), "error")
+        else:
+            keep = {"favorite_cuisines": user.get("favorite_cuisines", []),
+                    "avoid_allergens": user.get("avoid_allergens", [])}
+            form = type("Form", (dict,), {"getlist": lambda self, k: keep.get(k, [])})(
+                display_name=request.form.get("display_name", ""), cooking_role=user.get("cooking_role", ""),
+                home_country=user.get("home_country", ""), bio=user.get("bio", ""))
+            accounts.update_profile(user["id"], form)
+            flash("Name saved.", "success")
+        return redirect(url_for("admin_account"))
+    return render_template("admin/admin_account.html", active="account", tab="account")
 
 
 @app.errorhandler(403)

@@ -245,3 +245,29 @@ def history_stats():
         ).fetchall()
         users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     return {"total_searches": total, "users": users, "top_dishes": [dict(r) for r in top]}
+
+
+def searches_per_day(days=7):
+    """Number of saved searches on each of the last `days` days (oldest first), as [(date, n)]."""
+    import datetime
+    today = datetime.date.today()
+    first = today - datetime.timedelta(days=days - 1)
+    with closing(_conn()) as conn:
+        rows = conn.execute(
+            "SELECT date(created_at, 'localtime') AS day, COUNT(*) AS n FROM search_history "
+            "WHERE date(created_at, 'localtime') >= ? GROUP BY day", (first.isoformat(),)
+        ).fetchall()
+    found = {r["day"]: r["n"] for r in rows}
+    return [(first + datetime.timedelta(days=i), found.get((first + datetime.timedelta(days=i)).isoformat(), 0))
+            for i in range(days)]
+
+
+def recent_searches(limit=8):
+    """Latest searches by any logged-in user, for the admin dashboard."""
+    with closing(_conn()) as conn:
+        rows = conn.execute(
+            "SELECT h.*, u.username, COALESCE(NULLIF(u.display_name, ''), u.username) AS user_name "
+            "FROM search_history h JOIN users u ON u.id = h.user_id "
+            "ORDER BY h.created_at DESC, h.id DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return [dict(r) for r in rows]

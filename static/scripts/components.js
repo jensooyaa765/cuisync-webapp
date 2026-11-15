@@ -25,7 +25,7 @@ class AppNav extends HTMLElement {
     this.initAccount();
   }
 
-  // Login / profile / admin links (panel revision: user and admin pages)
+  // Login / profile links (panel revision: user pages). The admin is a separate app (admin_app.py).
   initAccount() {
     const path = window.location.pathname;
     this.querySelectorAll('.nav-links a').forEach(link => {
@@ -40,13 +40,6 @@ class AppNav extends HTMLElement {
         account.textContent = 'PROFILE';
         account.href = '/profile';
         if (path.startsWith('/profile')) account.classList.add('active');
-        if (me.is_admin) {
-          const admin = document.createElement('a');
-          admin.href = '/admin';
-          admin.textContent = 'ADMIN';
-          if (path.startsWith('/admin')) admin.classList.add('active');
-          account.before(admin);
-        }
         const out = document.createElement('a');
         out.href = '/logout';
         out.textContent = 'LOGOUT';

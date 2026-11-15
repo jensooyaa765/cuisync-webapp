@@ -2,7 +2,7 @@
 {% block title %}{{ 'Create account' if mode == 'register' else 'Log in' }}{% endblock %}
 {% block eyebrow %}YOUR CUISYNC ACCOUNT{% endblock %}
 {% block heading %}{{ 'Create an account' if mode == 'register' else 'Welcome back' }}{% endblock %}
-{% block lead %}{{ 'Save your searches, set your profile and allergens to watch for.' if mode == 'register' else 'Log in to see your search history and profile. Admins log in here too.' }}{% endblock %}
+{% block lead %}{{ 'Save your searches, set your profile and allergens to watch for.' if mode == 'register' else 'Log in to see your search history and profile.' }}{% endblock %}
 {% block content %}
 <section class="panel-card auth-card">
   {% if forbidden %}<div class="flash flash-error">{{ forbidden }}</div>{% endif %}

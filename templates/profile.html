@@ -1,6 +1,6 @@
 {% extends "panel_base.html" %}
 {% block title %}Profile{% endblock %}
-{% block eyebrow %}{{ 'ADMIN' if user.is_admin else 'USER' }} PROFILE{% endblock %}
+{% block eyebrow %}YOUR PROFILE{% endblock %}
 {% block heading %}{{ user.name }}{% endblock %}
 {% block lead %}@{{ user.username }}{% if user.cooking_role %} &middot; {{ user.cooking_role }}{% endif %}{% if user.home_country %} &middot; {{ user.home_country }}{% endif %}{% endblock %}
 {% block content %}
@@ -8,7 +8,6 @@
   <a href="#history">SEARCH HISTORY</a>
   <a href="#profile">PROFILE</a>
   <a href="#account">ACCOUNT</a>
-  {% if user.is_admin %}<a href="{{ url_for('admin_page') }}">ADMIN PAGE &rarr;</a>{% endif %}
 </nav>
 
 <!-- SEARCH HISTORY (Oab 3, Galang 5) -->

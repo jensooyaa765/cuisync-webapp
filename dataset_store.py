@@ -108,6 +108,26 @@ class DatasetStore:
         self.prompts = self._load_json(self.prompts_path, {})
         self.missing_vectors = []
 
+    # ---------------- sharing with the admin app ----------------
+    # The admin app (admin_app.py) runs as a separate program and saves its changes in
+    # admin_data/. The public app compares data_version() before each request and calls
+    # reload_from_disk() when the admin changed something.
+    def data_version(self):
+        out = []
+        for path in (self.recipes_path, self.countries_path, self.prompts_path):
+            try:
+                out.append(os.stat(path).st_mtime_ns)
+            except OSError:
+                out.append(None)
+        return tuple(out)
+
+    def reload_from_disk(self):
+        with self.lock:
+            self.uses_admin_data = os.path.exists(self.recipes_path)
+            self.recipes = self._load_recipes()
+            self.countries = self._load_countries()
+            self.prompts = self._load_json(self.prompts_path, {})
+
     # ---------------- helpers ----------------
     @staticmethod
     def _key(recipe):
@@ -252,6 +272,48 @@ class DatasetStore:
             self.uses_admin_data = False
             self.countries = self._load_countries()
 
+    # ---------------- custom tags (admin Tag Management) ----------------
+    def custom_tags(self):
+        """Custom tags typed on dishes (the "tags" field), as {Tag Label: number of dishes}."""
+        counts = {}
+        for r in self.recipes:
+            for t in _dedupe(_split(r.get("tags"))):
+                label = t.title()
+                counts[label] = counts.get(label, 0) + 1
+        return counts
+
+    def rename_tag(self, old, new):
+        """Rename (or merge) a custom tag on every dish that has it. Returns the number of dishes changed."""
+        old_key, new_label = (old or "").strip().lower(), (new or "").strip()
+        if not old_key or not new_label:
+            raise ValueError("Type the new tag name.")
+        if "," in new_label:
+            raise ValueError("A tag name can't contain a comma.")
+        return self._change_tag(old_key, new_label)
+
+    def delete_tag(self, name):
+        """Remove a custom tag from every dish. Returns the number of dishes changed."""
+        return self._change_tag((name or "").strip().lower(), None)
+
+    def _change_tag(self, old_key, new_label):
+        with self.lock:
+            changed = 0
+            for r in self.recipes:
+                tags = [t.strip() for t in str(r.get("tags") or "").split(",") if t.strip()]
+                if not any(t.lower() == old_key for t in tags):
+                    continue
+                out = []
+                for t in tags:
+                    if t.lower() == old_key:
+                        t = new_label  # None = delete
+                    if t and t.lower() not in {o.lower() for o in out}:
+                        out.append(t)
+                r["tags"] = ", ".join(out)
+                changed += 1
+            if changed:
+                self.save_recipes()
+            return changed
+
     # ---------------- countries ----------------
     def save_countries(self):
         with self.lock:
@@ -370,8 +432,11 @@ class DatasetStore:
             return v / n if n else None
         return None
 
-    def write_matcher_files(self):
-        """Write <feature>_items.json and <feature>_item_vecs.npy for the current dataset."""
+    def write_matcher_files(self, write=True):
+        """Write <feature>_items.json and <feature>_item_vecs.npy for the current dataset.
+
+        write=False only works out self.missing_vectors (the admin app uses this; only the
+        public app writes the matcher files, so the two programs never write them at once)."""
         with self.lock:
             missing = []
             for feature in FEATURES:
@@ -419,6 +484,8 @@ class DatasetStore:
                     if b not in kept:
                         for i in set(ids):
                             df[i] = max(df[i] - 1, 1.0)
+                if not write:
+                    continue
                 np.save(os.path.join(self.runtime_dir, f"{feature}_item_vecs.npy"), all_vecs)
                 with open(os.path.join(self.runtime_dir, f"{feature}_items.json"), "w", encoding="utf-8") as f:
                     json.dump({"items": items, "df": df.tolist(), "n_recipes": len(self.recipes),
