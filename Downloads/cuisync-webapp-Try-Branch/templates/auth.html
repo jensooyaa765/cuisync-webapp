@@ -1,0 +1,38 @@
+{% extends "panel_base.html" %}
+{% block title %}{{ 'Create account' if mode == 'register' else 'Log in' }}{% endblock %}
+{% block eyebrow %}YOUR CUISYNC ACCOUNT{% endblock %}
+{% block heading %}{{ 'Create an account' if mode == 'register' else 'Welcome back' }}{% endblock %}
+{% block lead %}{{ 'Save your searches, set your profile and allergens to watch for.' if mode == 'register' else 'Log in to see your search history and profile.' }}{% endblock %}
+{% block content %}
+<section class="panel-card auth-card">
+  {% if forbidden %}<div class="flash flash-error">{{ forbidden }}</div>{% endif %}
+  <form method="POST" action="{{ url_for('register') if mode == 'register' else url_for('login') }}" class="panel-form">
+    <input type="hidden" name="next" value="{{ next }}">
+    {% if mode == 'register' %}
+    <label>Display name <span class="muted">(optional)</span>
+      <input type="text" name="display_name" maxlength="60" autocomplete="name">
+    </label>
+    {% endif %}
+    <label>Username
+      <input type="text" name="username" required minlength="3" autocomplete="username" autofocus>
+    </label>
+    <label>Password
+      <input type="password" name="password" required minlength="6" autocomplete="{{ 'new-password' if mode == 'register' else 'current-password' }}">
+    </label>
+    {% if mode == 'register' %}
+    <label>Confirm password
+      <input type="password" name="confirm" required minlength="6" autocomplete="new-password">
+    </label>
+    {% endif %}
+    <button type="submit" class="btn-panel btn-panel-red">{{ 'CREATE ACCOUNT' if mode == 'register' else 'LOG IN' }}</button>
+  </form>
+  <p class="auth-switch">
+    {% if mode == 'register' %}
+      Already have an account? <a href="{{ url_for('login') }}">Log in</a>
+    {% else %}
+      New to CuiSync? <a href="{{ url_for('register') }}">Create an account</a>
+    {% endif %}
+  </p>
+  <p class="muted small">You can still search without an account. Logging in only adds history and profile features.</p>
+</section>
+{% endblock %}

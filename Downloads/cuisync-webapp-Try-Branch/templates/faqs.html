@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CUISYNC - Frequently Asked Questions</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;1,400&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/base-style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/faqs.css') }}">
+</head>
+<body class="faqs-page">
+
+  <app-nav></app-nav>
+
+  <!-- ==================================
+       MAIN CONTENT
+       ================================== -->
+  <main class="faq-container">
+    
+    <header class="faq-header">
+      <span class="sub-label">◆ HELP CENTER</span>
+      <h1 class="faq-title">FREQUENTLY ASKED QUESTIONS</h1>
+      <p class="faq-subtitle">
+        Everything you need to know about CUISYNC — from how it works, what is it powered, and its coverage
+      </p>
+    </header>
+
+    <div class="faq-content-grid">
+      
+      <aside class="faq-sidebar">
+        <span class="sidebar-label">CATEGORIES</span>
+        <nav class="category-nav">
+          <a href="#general" class="category-link active">GENERAL</a>
+          <a href="#how-it-works" class="category-link">HOW IT WORKS</a>
+          <a href="#recipe-data" class="category-link">RECIPE DATA</a>
+          <a href="#similarity-score" class="category-link">SIMILARITY SCORE</a>
+          <a href="#ai-accuracy" class="category-link">AI & ACCURACY</a>
+          <a href="#privacy-usage" class="category-link">PRIVACY & USAGE</a>
+        </nav>
+      </aside>
+
+      <section class="faq-sections">
+
+        <div class="faq-group" id="general">
+          <span class="group-category">GENERAL</span>
+          <h2 class="group-title">ABOUT CUISYNC</h2>
+          
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>What is Cuisync?</span>
+              <span class="faq-toggle">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>Cuisync is a food recommendation system designed to encourage individuals to explore foreign cuisines by providing grounded explanations of cuisine similarities through the use of natural language processing techniques and large language models.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Who is Cuisync designed for?</span>
+              <span class="faq-toggle">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>Cuisync is designed for home cooks, general consumers, food enthusiasts, and food industry professionals.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="faq-group" id="how-it-works">
+          <span class="group-category">HOW IT WORKS</span>
+          <h2 class="group-title">ABOUT CUISYNC</h2>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>How do I search for comparison?</span>
+              <span class="faq-toggle">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>From the Home page, select a Dish, its Origin Country, and your Target Country which the country you want to find similar dishes in, then click Search New DIsh.  Cuisync will then display the closest matching dish in the target country based on our gathered data along with a breakdown of ingredient and cooking process similarities as well as a geographic display of other similar dishes.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Which Countries are supported?</span>
+              <span class="faq-toggle">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>Cuisync currently supports cuisines from selected Asian countries, including Cambodia, China, India, Indonesia, Japan, Malaysia, the Philippines, Saudi Arabia, South Korea, Turkey, and Vietnam.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Which languages are supported?</span>
+              <span class="faq-toggle">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>Cuisync supports the processing of multiple languages, including English, Hindi, Arabic, Japanese, Korean, Chinese, Vietnamese, Thai, Malay, and Khmer, by integrating Google Translate for language translation.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="faq-group" id="recipe-data">
+          <span class="group-category">RECIPE DATA</span>
+          <h2 class="group-title">DATA SOURCE</h2>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Where does Cuisync's recipe data come from?</span>
+              <span class="faq-toggle">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>Recipe data is sourced from a curated combination of culinary datasets, such as RecipeNLG and INDoRI.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="faq-group" id="similarity-score">
+          <span class="group-category">SIMILARITY SCORE</span>
+          <h2 class="group-title">UNDERSTANDING THE METRICS</h2>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>What does the Overall Similarity Score mean?</span>
+              <span class="faq-toggle">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>The Overall Similarity Score is a weighted average that reflects how closely two dishes resemble each other across two dimensions: ingredients and cooking actions. Additionally, SHAP (SHapley Additive exPlanations) values are used to determine the contribution of each entity, identifying which had the greatest influence on the overall similarity score.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>How does Cuisync calculate the similarity?</span>
+              <span class="faq-toggle">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>The similarity are calculated based on the dishes entities, which are represented as word embeddings that are used to compute for the cosine similarity, similarities with the recipe names, raritiy of ingredients or idf which also affects the weights of the similarity analysis.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>How are shared and unique entities identified?</span>
+              <span class="faq-toggle">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>In the Extracted Entities section, ingredient and cooking instruction tags are color-coded to indicate their relationship between the two dishes: gold represents entities shared by both dishes, red represents entities unique to the origin cuisine, and green represents entities unique to the target cuisine.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="faq-group" id="ai-accuracy">
+          <span class="group-category">AI & ACCURACY</span>
+          <h2 class="group-title">LANGUAGE MODELS</h2>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Which language model powers the similarity explanations?</span>
+              <span class="faq-toggle">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>Similarity descriptions are generated using GPT-4o based on the extracted ingredients and cooking processes of both dishes. Each explanation is labeled with an “AI Explanation” badge to clearly indicate that the content is AI-generated, allowing users to distinguish it from factual data.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Does the visualization show real data?</span>
+              <span class="faq-toggle">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>Yes, it is based on the gathered data obtained through system queries, evaluations, and similarity score results computed from the extracted entities.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="faq-group" id="privacy-usage">
+          <span class="group-category">PRIVACY & USAGE</span>
+          <h2 class="group-title">DATA PRIVACY</h2>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Does Cuisync collect personal data?</span>
+              <span class="faq-toggle">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>Cuisync does not collect personal data and does not require users to sign in. It functions solely as a tool for discovering similar cuisines across Asia, providing evidence-based insights.</p>
+            </div>
+          </div>
+        </div>
+
+      </section>
+    </div>
+  </main>
+
+  <app-footer></app-footer>
+
+  <script src="{{ url_for('static', filename='scripts/components.js') }}"></script>
+
+  <!-- ==================================
+       ACCORDION CARD SCRIPT
+       ================================== -->
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const faqQuestions = document.querySelectorAll(".faq-question");
+
+      faqQuestions.forEach((button) => {
+        button.addEventListener("click", () => {
+          const faqItem = button.parentElement;
+          const siblingItems = faqItem.parentElement.querySelectorAll(".faq-item");
+          
+          siblingItems.forEach((item) => {
+            if (item !== faqItem) {
+              item.classList.remove("active");
+            }
+          });
+
+          faqItem.classList.toggle("active");
+        });
+      });
+
+      const sections = document.querySelectorAll(".faq-group");
+      const navLinks = document.querySelectorAll(".category-link");
+
+      function setActiveLink(id) {
+        navLinks.forEach((link) => {
+          link.classList.toggle("active", link.getAttribute("href") === `#${id}`);
+        });
+      }
+
+      // Keep the clicked category highlighted while the page scrolls to it
+      let clickLockUntil = 0;
+      navLinks.forEach((link) => {
+        link.addEventListener("click", () => {
+          setActiveLink(link.getAttribute("href").slice(1));
+          clickLockUntil = Date.now() + 1000;
+        });
+      });
+
+      window.addEventListener("scroll", () => {
+        if (Date.now() < clickLockUntil) return;
+
+        let current = "";
+
+        sections.forEach((section) => {
+          const sectionTop = section.offsetTop - 120;
+          if (window.scrollY >= sectionTop) {
+            current = section.getAttribute("id");
+          }
+        });
+
+        // At the bottom, highlight the last section (it's too short to reach the top)
+        const atBottom =
+          window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+        if (atBottom && sections.length) {
+          current = sections[sections.length - 1].getAttribute("id");
+        }
+
+        setActiveLink(current);
+      });
+    });
+  </script>
+</body>
+</html>
