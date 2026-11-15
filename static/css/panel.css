@@ -402,7 +402,10 @@ a.tag-chip:hover { background: var(--gold-light); }
    HOME PAGE TEXT SEARCH: Dish / Ingredients toggle, ingredient chips, results popup
    ========================================================================== */
 .search-mode-toggle {
-  display: inline-flex;
+  display: flex;
+  width: fit-content;
+  margin-left: auto;
+  margin-right: auto;
   gap: 4px;
   padding: 4px;
   margin-bottom: 16px;
@@ -635,3 +638,179 @@ a.tag-chip:hover { background: var(--gold-light); }
 .dish-change-btn.needs-choice:hover { background: var(--maroon-dark); color: #fff; }
 @keyframes choose-pulse { 50% { box-shadow: 0 0 0 5px rgba(128, 13, 18, 0.18); } }
 @media (prefers-reduced-motion: reduce) { .dish-change-btn.needs-choice { animation: none; } }
+
+/* Search by image: Upload Photo / Take a Photo buttons */
+.dropzone-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+.dropzone-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--maroon-main);
+  background: transparent;
+  color: var(--maroon-main);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+.dropzone-btn { -webkit-tap-highlight-color: transparent; }
+.dropzone-btn-camera { background: var(--maroon-main); color: var(--gold-light); }
+/* Hover only where there is a real mouse: on phones a tap "sticks" as hover and the button stayed red */
+@media (hover: hover) and (pointer: fine) {
+  .dropzone-btn:hover { background: rgba(128, 13, 18, 0.08); }
+  .dropzone-btn-camera:hover { background: var(--maroon-dark); }
+}
+/* Short press feedback without changing the color */
+.dropzone-btn:active { transform: scale(0.97); }
+/* Computers with a mouse have no phone camera to open, so the camera button is for phones and tablets */
+@media (hover: hover) and (pointer: fine) {
+  .dropzone-btn-camera { display: none; }
+}
+
+/* In-page camera (Take a Photo) */
+html.camera-open, html.camera-open body { overflow: hidden; }
+.camera-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: rgba(20, 8, 4, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.camera-overlay.hidden { display: none; }
+.camera-box {
+  position: relative;
+  width: min(100%, 560px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.camera-close {
+  position: absolute;
+  top: -6px;
+  right: 0;
+  z-index: 2;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.camera-view {
+  width: 100%;
+  margin-top: 40px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #000;
+  border: 1px solid rgba(220, 179, 73, 0.5);
+}
+.camera-video { display: block; width: 100%; max-height: 65vh; object-fit: cover; background: #000; }
+.camera-message { padding: 40px 24px; color: var(--text-cream); text-align: center; font-size: 0.9rem; line-height: 1.5; }
+.camera-tip { color: var(--text-sub); font-size: 0.8rem; text-align: center; }
+.camera-controls { width: 100%; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+.camera-switch {
+  justify-self: start;
+  width: 48px;
+  height: 48px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 1.4rem;
+  cursor: pointer;
+}
+.camera-shutter {
+  width: 74px;
+  height: 74px;
+  border-radius: 50%;
+  border: 4px solid var(--gold-accent);
+  background: transparent;
+  padding: 5px;
+  cursor: pointer;
+}
+.camera-shutter span { display: block; width: 100%; height: 100%; border-radius: 50%; background: #fff; transition: transform 0.1s; }
+.camera-shutter:active span { transform: scale(0.9); }
+.camera-fallback { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+.camera-fallback[hidden], .camera-controls[hidden], .camera-message[hidden], .camera-tip[hidden] { display: none; }
+.camera-fallback .dropzone-btn { color: #fff; border-color: var(--gold-accent); }
+.camera-fallback .dropzone-btn-camera { display: inline-flex; color: var(--maroon-dark); background: var(--gold-accent); }
+
+/* Phones and tablets: the box is not tappable, only the Upload / Take a Photo buttons */
+@media (hover: none), (pointer: coarse) {
+  #dropzone { cursor: default; -webkit-tap-highlight-color: transparent; }
+  #dropzone .dropzone-default { pointer-events: none; }
+  #dropzone .dropzone-default .dropzone-actions,
+  #dropzone .dropzone-default .dropzone-actions * { pointer-events: auto; }
+}
+
+/* Popup cards: centered rows, so 2, 3 or 4 dishes sit in the middle instead of on the left.
+   Used by every popup (dish name, ingredients, tags, image search). */
+.dish-grid.popup-dish-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 16px;
+}
+.popup-dish-grid > .popup-dish-card {
+  flex: 0 1 210px;
+  width: 210px;
+  max-width: 100%;
+}
+@media (max-width: 820px) {
+  .dish-grid.popup-dish-grid { gap: 12px; }
+  .popup-dish-grid > .popup-dish-card { flex-basis: calc(50% - 6px); width: calc(50% - 6px); }
+}
+
+/* Phones: popup close button as a red pill ("× CLOSE") so it is easy to see and tap */
+@media (max-width: 820px), (pointer: coarse) {
+  .modal-overlay .modal-close-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    top: 10px;
+    right: 10px;
+    z-index: 5;
+    min-height: 34px;
+    padding: 6px 14px 6px 11px;
+    border-radius: 999px;
+    background: var(--maroon-main);
+    color: #fff;
+    font-size: 1.15rem;
+    line-height: 1;
+    box-shadow: 0 2px 8px rgba(103, 8, 12, 0.35);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .modal-overlay .modal-close-btn::after {
+    content: 'CLOSE';
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 1.2px;
+  }
+  .modal-overlay .modal-close-btn:hover,
+  .modal-overlay .modal-close-btn:active { background: var(--maroon-dark); color: #fff; }
+  /* Long dish popups scroll, so the button stays pinned at the top */
+  .dish-results-box .modal-close-btn {
+    position: sticky;
+    float: right;
+    top: 0;
+    margin: -16px -6px 4px 0;
+  }
+  .dish-results-box .modal-title { clear: both; }
+}

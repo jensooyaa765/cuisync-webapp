@@ -248,21 +248,12 @@ document.addEventListener('DOMContentLoaded', () => {
     dishInput.focus();
   }
 
-  // Typed name that belongs to exactly one recipe: fill in its country right away
-  function autoFillFromTyped() {
-    if (typeof recordsForName !== 'function') return;
-    const matches = recordsForName(dishInput.value);
-    if (matches.length === 1) {
-      recipeIdInput.value = matches[0].id ?? '';
-      setOrigin(matches[0].country);
-    }
-  }
-
   dishInput.addEventListener('input', () => {
     lastResults = null;
     clearPick();
     renderDropdown(getTopMatches(dishInput.value));
-    autoFillFromTyped();
+    // No auto-pick while typing: "sushi" matches one record exactly, but the search should
+    // still show every sushi dish in the popup. Picking a row from the dropdown still picks it.
     updateInputActions();
   });
   dishInput.addEventListener('focus', () => {
@@ -432,10 +423,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+  let popupOnClose = null;   // the image search runs its own code when the popup closes
+
   function closePopup() {
     popup.classList.add('hidden');
     submitAfterPick = false;
     updateInputActions();
+    const onClose = popupOnClose;
+    popupOnClose = null;
+    if (onClose) onClose();
   }
 
   function dishButton(d, onPick) {
@@ -466,10 +462,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // onPick: what happens when a dish is clicked (the tag tab passes its own)
-  function showPopup(data, onPick = choose) {
+  function showPopup(data, onPick = choose, onClose = null) {
     if (onPick === choose) lastResults = data;
+    popupOnClose = onClose;
     const n = data.total;
-    if (data.mode === 'tags') {
+    if (data.mode === 'image') {
+      popupTitle.textContent = 'Choose a Dish from the Menu';
+      popupDesc.textContent = `We found ${n} dishes in the image. Select the one you want to compare.`;
+    } else if (data.mode === 'tags') {
       popupTitle.textContent = `${n} Dish${n === 1 ? '' : 'es'} Found`;
       popupDesc.textContent = `Dishes tagged ${data.tags.join(' + ')}`
         + (n > data.dishes.length ? ` (showing the first ${data.dishes.length})` : '')

@@ -269,6 +269,18 @@ def save_history(**entry):
             app.logger.warning("Could not save search history: %s", error)
 
 
+def with_card_info(matches):
+    """Add tags, ingredients and recipe_id to OCR matches, so the image search popup can
+    show the same dish cards as the text search popup."""
+    out = []
+    for match in matches or []:
+        key = (normalize_name(match.get("title", "")), normalize_name(match.get("country", "")))
+        idx = next((i for i, r in enumerate(RECIPES)
+                    if (normalize_name(r.get("title", "")), normalize_name(r.get("country", ""))) == key), None)
+        out.append({**dish_card(idx), **match} if idx is not None else match)
+    return out
+
+
 def dish_card(idx, score=None, found=None):
     """Small dict for the Explore page cards."""
     r = RECIPES[idx]
@@ -723,7 +735,7 @@ def extract_dish_info():
             })
 
         romanized = ocr.romanize_lines(lines)
-        matches = ocr.find_recipes(romanized, recipes=RECIPES)
+        matches = with_card_info(ocr.find_recipes(romanized, recipes=RECIPES))
         return jsonify({
             "success": bool(matches),
             "message": "" if matches else "No matching recipe found in dataset.",

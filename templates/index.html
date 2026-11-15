@@ -193,6 +193,8 @@
         
         <div class="upload-dropzone" id="dropzone">
           <input type="file" id="image-upload-input" name="dish_image" accept="image/*" hidden>
+          <!-- Opens the phone camera straight away (the photo is then handled like an upload) -->
+          <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
           
           <div class="dropzone-default" id="dropzone-default">
             <div class="dropzone-icon">
@@ -205,6 +207,16 @@
             <p class="dropzone-title">Upload an image of a recipe/menu containing the dish name</p>
             <p class="dropzone-subtitle">Works with English, Chinese, Japanese, Korean, Thai and more.</p>
             <p class="dropzone-note">Khmer and Burmese text is not supported yet.</p>
+            <div class="dropzone-actions">
+              <button type="button" class="dropzone-btn" id="upload-photo-btn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                Upload Photo
+              </button>
+              <button type="button" class="dropzone-btn dropzone-btn-camera" id="camera-btn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                Take a Photo
+              </button>
+            </div>
           </div>
 
           <div class="dropzone-preview" id="dropzone-preview" style="display: none;">

@@ -34,6 +34,9 @@ code { font-family: ui-monospace, Menlo, monospace; font-size: 0.85em; }
   background: var(--admin-sidebar); color: #f3e9d7;
   padding: 28px 16px;
   display: flex; flex-direction: column;
+  /* Stays in place while the content scrolls (phones: see the 820px rule below) */
+  position: sticky; top: 0; align-self: flex-start;
+  height: 100vh; height: 100dvh; overflow-y: auto;
 }
 .admin-main {
   flex: 999 1 560px; min-width: 0;
