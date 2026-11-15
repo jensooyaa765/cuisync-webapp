@@ -316,6 +316,37 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fileInput.files[0]) displayPreview(fileInput.files[0]);
   });
 
+  // Take a Photo: open the camera, then treat the picture like an uploaded file
+  const cameraInput = document.getElementById('camera-input');
+  const cameraBtn = document.getElementById('camera-btn');
+  const uploadBtn = document.getElementById('upload-photo-btn');
+  if (cameraBtn && cameraInput) {
+    cameraBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      cameraInput.click();
+    });
+    cameraInput.addEventListener('change', () => {
+      const file = cameraInput.files[0];
+      if (!file) return;
+      try {
+        // Put the photo in the real upload field so the form sends it
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        fileInput.files = transfer.files;
+      } catch (error) {
+        console.warn('[Cuisync] Could not copy the camera photo into the upload field', error);
+      }
+      cameraInput.value = '';
+      displayPreview(file);
+    });
+  }
+  if (uploadBtn) {
+    uploadBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      fileInput.click();
+    });
+  }
+
   // Drag and drop
   ['dragenter', 'dragover'].forEach((eventName) => dropzone.addEventListener(eventName, (event) => {
     event.preventDefault();
@@ -382,7 +413,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Check before submit
   imageForm.addEventListener('submit', (event) => {
-    if (!fileInput.files[0]) {
+    // A dish already picked from the photo is enough (the camera photo may not be in fileInput on old phones)
+    if (!fileInput.files[0] && !hiddenDishInput.value) {
       event.preventDefault();
       showErrorModal('Upload a Photo', 'Upload a photo of a menu first so we can find the dish and its country.');
       return;
