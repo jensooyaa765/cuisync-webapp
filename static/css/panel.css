@@ -660,10 +660,99 @@ a.tag-chip:hover { background: var(--gold-light); }
   cursor: pointer;
   transition: background 0.2s, color 0.2s;
 }
-.dropzone-btn:hover { background: var(--maroon-main); color: #fff; }
+.dropzone-btn { -webkit-tap-highlight-color: transparent; }
 .dropzone-btn-camera { background: var(--maroon-main); color: var(--gold-light); }
-.dropzone-btn-camera:hover { background: var(--maroon-dark); }
+/* Hover only where there is a real mouse: on phones a tap "sticks" as hover and the button stayed red */
+@media (hover: hover) and (pointer: fine) {
+  .dropzone-btn:hover { background: rgba(128, 13, 18, 0.08); }
+  .dropzone-btn-camera:hover { background: var(--maroon-dark); }
+}
+/* Short press feedback without changing the color */
+.dropzone-btn:active { transform: scale(0.97); }
 /* Computers with a mouse have no phone camera to open, so the camera button is for phones and tablets */
 @media (hover: hover) and (pointer: fine) {
   .dropzone-btn-camera { display: none; }
+}
+
+/* In-page camera (Take a Photo) */
+html.camera-open, html.camera-open body { overflow: hidden; }
+.camera-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: rgba(20, 8, 4, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.camera-overlay.hidden { display: none; }
+.camera-box {
+  position: relative;
+  width: min(100%, 560px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.camera-close {
+  position: absolute;
+  top: -6px;
+  right: 0;
+  z-index: 2;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.camera-view {
+  width: 100%;
+  margin-top: 40px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #000;
+  border: 1px solid rgba(220, 179, 73, 0.5);
+}
+.camera-video { display: block; width: 100%; max-height: 65vh; object-fit: cover; background: #000; }
+.camera-message { padding: 40px 24px; color: var(--text-cream); text-align: center; font-size: 0.9rem; line-height: 1.5; }
+.camera-tip { color: var(--text-sub); font-size: 0.8rem; text-align: center; }
+.camera-controls { width: 100%; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+.camera-switch {
+  justify-self: start;
+  width: 48px;
+  height: 48px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 1.4rem;
+  cursor: pointer;
+}
+.camera-shutter {
+  width: 74px;
+  height: 74px;
+  border-radius: 50%;
+  border: 4px solid var(--gold-accent);
+  background: transparent;
+  padding: 5px;
+  cursor: pointer;
+}
+.camera-shutter span { display: block; width: 100%; height: 100%; border-radius: 50%; background: #fff; transition: transform 0.1s; }
+.camera-shutter:active span { transform: scale(0.9); }
+.camera-fallback { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+.camera-fallback[hidden], .camera-controls[hidden], .camera-message[hidden], .camera-tip[hidden] { display: none; }
+.camera-fallback .dropzone-btn { color: #fff; border-color: var(--gold-accent); }
+.camera-fallback .dropzone-btn-camera { display: inline-flex; color: var(--maroon-dark); background: var(--gold-accent); }
+
+/* Phones and tablets: the box is not tappable, only the Upload / Take a Photo buttons */
+@media (hover: none), (pointer: coarse) {
+  #dropzone { cursor: default; -webkit-tap-highlight-color: transparent; }
+  #dropzone .dropzone-default { pointer-events: none; }
+  #dropzone .dropzone-default .dropzone-actions,
+  #dropzone .dropzone-default .dropzone-actions * { pointer-events: auto; }
 }

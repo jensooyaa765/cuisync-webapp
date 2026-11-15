@@ -300,8 +300,12 @@ document.addEventListener('DOMContentLoaded', () => {
     extractImageInfo(file);
   }
 
+  // Phones and tablets: only the Upload / Take a Photo buttons open the picker, not the whole box
+  const isTouchDevice = window.matchMedia('(hover: none), (pointer: coarse)').matches;
+
   // Open file picker, except on inner buttons
   dropzone.addEventListener('click', (event) => {
+    if (isTouchDevice) return;
     if (
       event.target.closest('#remove-img-btn') ||
       event.target.closest('#selected-dish-card') ||
@@ -316,28 +320,158 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fileInput.files[0]) displayPreview(fileInput.files[0]);
   });
 
-  // Take a Photo: open the camera, then treat the picture like an uploaded file
+  // Take a Photo. Some Android browsers ignore capture="environment" on a file input and only
+  // show the gallery, so the camera is opened inside the page (getUserMedia) when possible.
+  // If the browser blocks that, the user can still open the phone's camera app or upload.
   const cameraInput = document.getElementById('camera-input');
   const cameraBtn = document.getElementById('camera-btn');
   const uploadBtn = document.getElementById('upload-photo-btn');
+
+  // Same as choosing a file: put it in the upload field and scan it
+  function useCapturedFile(file) {
+    try {
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      fileInput.files = transfer.files;
+    } catch (error) {
+      console.warn('[Cuisync] Could not copy the camera photo into the upload field', error);
+    }
+    displayPreview(file);
+  }
+
+  let cameraStream = null;
+  let facingMode = 'environment';
+  let cameraModal = null;
+
+  function stopCamera() {
+    if (cameraStream) cameraStream.getTracks().forEach((t) => t.stop());
+    cameraStream = null;
+  }
+
+  function closeCamera() {
+    stopCamera();
+    if (cameraModal) cameraModal.classList.add('hidden');
+    document.documentElement.classList.remove('camera-open');
+  }
+
+  function buildCameraModal() {
+    cameraModal = document.createElement('div');
+    cameraModal.className = 'camera-overlay hidden';
+    cameraModal.setAttribute('role', 'dialog');
+    cameraModal.setAttribute('aria-modal', 'true');
+    cameraModal.setAttribute('aria-label', 'Take a photo of the menu');
+    cameraModal.innerHTML = `
+      <div class="camera-box">
+        <button type="button" class="camera-close" aria-label="Close camera">&times;</button>
+        <div class="camera-view">
+          <video class="camera-video" autoplay playsinline muted></video>
+          <div class="camera-message" hidden></div>
+        </div>
+        <p class="camera-tip">Fit the dish names in the frame and hold steady.</p>
+        <div class="camera-controls">
+          <button type="button" class="camera-switch" aria-label="Switch camera">&#8635;</button>
+          <button type="button" class="camera-shutter" aria-label="Take photo"><span></span></button>
+          <span class="camera-spacer"></span>
+        </div>
+        <div class="camera-fallback" hidden>
+          <button type="button" class="dropzone-btn dropzone-btn-camera camera-app-btn">Open Camera App</button>
+          <button type="button" class="dropzone-btn camera-upload-btn">Upload Photo</button>
+        </div>
+      </div>`;
+    document.body.appendChild(cameraModal);
+    cameraModal.querySelector('.camera-close').addEventListener('click', closeCamera);
+    cameraModal.addEventListener('click', (e) => { if (e.target === cameraModal) closeCamera(); });
+    cameraModal.querySelector('.camera-switch').addEventListener('click', () => {
+      facingMode = facingMode === 'environment' ? 'user' : 'environment';
+      startCamera();
+    });
+    cameraModal.querySelector('.camera-shutter').addEventListener('click', takePicture);
+    // Fallbacks run from a tap, so the browser allows opening the picker
+    cameraModal.querySelector('.camera-app-btn').addEventListener('click', () => { closeCamera(); cameraInput.click(); });
+    cameraModal.querySelector('.camera-upload-btn').addEventListener('click', () => { closeCamera(); fileInput.click(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && cameraModal && !cameraModal.classList.contains('hidden')) closeCamera();
+    });
+  }
+
+  function showCameraProblem(text) {
+    const msg = cameraModal.querySelector('.camera-message');
+    msg.textContent = text;
+    msg.hidden = false;
+    cameraModal.querySelector('.camera-video').hidden = true;
+    cameraModal.querySelector('.camera-controls').hidden = true;
+    cameraModal.querySelector('.camera-tip').hidden = true;
+    cameraModal.querySelector('.camera-fallback').hidden = false;
+  }
+
+  async function startCamera() {
+    stopCamera();
+    const video = cameraModal.querySelector('.camera-video');
+    cameraModal.querySelector('.camera-message').hidden = true;
+    cameraModal.querySelector('.camera-fallback').hidden = true;
+    cameraModal.querySelector('.camera-controls').hidden = false;
+    cameraModal.querySelector('.camera-tip').hidden = false;
+    video.hidden = false;
+    try {
+      cameraStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: facingMode }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      });
+      video.srcObject = cameraStream;
+      await video.play().catch(() => {});
+      // Only show the switch button when there is more than one camera
+      const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+      cameraModal.querySelector('.camera-switch').style.visibility =
+        devices.filter((d) => d.kind === 'videoinput').length > 1 ? 'visible' : 'hidden';
+    } catch (error) {
+      const name = error && error.name;
+      showCameraProblem(
+        name === 'NotAllowedError'
+          ? 'Camera access was blocked. Allow the camera for this site in your browser settings, or use the buttons below.'
+          : name === 'NotFoundError'
+            ? 'No camera was found on this device. You can upload a photo instead.'
+            : 'This browser could not open the camera here. Try the buttons below.'
+      );
+    }
+  }
+
+  function takePicture() {
+    const video = cameraModal.querySelector('.camera-video');
+    if (!video.videoWidth) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const file = new File([blob], `menu-photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      closeCamera();
+      useCapturedFile(file);
+    }, 'image/jpeg', 0.92);
+  }
+
+  function openCamera() {
+    // No in-page camera (old browser, or the page is not on https): use the phone's camera app
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) || !window.isSecureContext) {
+      cameraInput.click();
+      return;
+    }
+    if (!cameraModal) buildCameraModal();
+    cameraModal.classList.remove('hidden');
+    document.documentElement.classList.add('camera-open');
+    startCamera();
+  }
+
   if (cameraBtn && cameraInput) {
     cameraBtn.addEventListener('click', (event) => {
       event.stopPropagation();
-      cameraInput.click();
+      openCamera();
     });
     cameraInput.addEventListener('change', () => {
       const file = cameraInput.files[0];
       if (!file) return;
-      try {
-        // Put the photo in the real upload field so the form sends it
-        const transfer = new DataTransfer();
-        transfer.items.add(file);
-        fileInput.files = transfer.files;
-      } catch (error) {
-        console.warn('[Cuisync] Could not copy the camera photo into the upload field', error);
-      }
       cameraInput.value = '';
-      displayPreview(file);
+      useCapturedFile(file);
     });
   }
   if (uploadBtn) {
