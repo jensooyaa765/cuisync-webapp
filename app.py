@@ -1,20 +1,30 @@
+import csv
 import difflib
+import io
 import json
 import os
 import re
+import secrets
 import threading
 import unicodedata
-from functools import lru_cache
+from functools import lru_cache, wraps
 
 import cv2
 import numpy as np
-from flask import Flask, Response, abort, jsonify, render_template, request
+from flask import (Flask, Response, abort, flash, g, jsonify, redirect, render_template,
+                   request, session, url_for)
 from werkzeug.middleware.proxy_fix import ProxyFix
 import ocr
 import softmatch as soft_settings
 from softmatch import SoftMatcher
 from explainer import init as init_explainer, build_evidence, get_explanation
 from shapley import compute_shapley, influence_shares
+import accounts
+import cultural_info
+import cuisync_prompts
+import explainer
+import search_tools
+from dataset_store import DatasetStore, DISH_FIELDS, REGION_CHOICES
 
 
 app = Flask(__name__)
@@ -22,35 +32,48 @@ app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 # Max upload size (16 MB)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
+# Pick up template changes without restarting the app
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 
-# Load the recipe dataset
-json_path = os.path.join(app.root_path, 'recipes.json')
-with open(json_path, 'r', encoding='utf-8') as f:
-    RECIPES = json.load(f)
+# The data files are not on GitHub (see README step 4). Check for them first so a missing file
+# gives a clear message instead of a crash.
+_FEATURES = ("ingredients", "actions", "cookware", "utensils")
+_missing = [
+    name
+    for name in ["recipes.json"] + [f"{feature}_{suffix}" for feature in _FEATURES
+                                    for suffix in ("item_vecs.npy", "items.json")]
+    if not os.path.exists(os.path.join(app.root_path, name))
+]
+if _missing:
+    raise SystemExit(
+        "\n[CuiSync] Missing data files next to app.py: " + ", ".join(_missing)
+        + "\nDownload them from the Google Drive folder in the README (step 4) "
+          "and put them in the same folder as app.py.\n"
+    )
+
+# Load the recipe dataset.
+# The admin page can change the dataset, so it is kept in a DatasetStore (dataset_store.py).
+# Until the admin changes something, the original recipes.json and .npy files are used as is.
+STORE = DatasetStore(app.root_path)
+RECIPES = STORE.recipes
 
 # Make sure recipes.json is in the same order as the .npy files
 ORDER_FILE = os.path.join(app.root_path, 'embeddings_order.json')
-if os.path.exists(ORDER_FILE):
+if os.path.exists(ORDER_FILE) and not STORE.uses_admin_data:
     with open(ORDER_FILE, encoding='utf-8') as f:
         _order = json.load(f)
     if _order != [[r.get("title", ""), r.get("country", "")] for r in RECIPES]:
         raise RuntimeError("recipes.json does not match the .npy files. Re-run the vectorization.")
 
-# Soft matching needs the vectors and item lists of each feature
-_FEATURES = ("ingredients", "actions", "cookware", "utensils")
-_missing = [
-    name
-    for feature in _FEATURES
-    for name in (f"{feature}_item_vecs.npy", f"{feature}_items.json")
-    if not os.path.exists(os.path.join(app.root_path, name))
-]
-if _missing:
-    raise FileNotFoundError(
-        "Missing data files next to app.py: " + ", ".join(_missing)
-        + ". Download them from the Drive folder in the README (step 4)."
-    )
-MATCHER = SoftMatcher(app.root_path, RECIPES)
+def build_matcher():
+    """Soft matcher for the current dataset (original files, or the admin's version)."""
+    folder = STORE.write_matcher_files() if STORE.uses_admin_data else app.root_path
+    return SoftMatcher(folder, RECIPES)
+
+
+MATCHER = build_matcher()
+INGREDIENT_SEARCH = search_tools.IngredientSearch(MATCHER)
 
 # Gunicorn on Render skips __main__, so wake up the OCR Space here
 if ocr.OCR_API_URL and __name__ != "__main__":
@@ -129,6 +152,125 @@ def parse_items(text_field):
 init_explainer(RECIPES, parse_items)
 
 
+# ==========================================================================
+#  PANEL REVISIONS: accounts, admin data, cultural info
+# ==========================================================================
+
+# Session key for logins. Set SECRET_KEY in .env on a server; locally one is made once and kept.
+_key_file = os.path.join(STORE.data_dir, "secret_key")
+if os.environ.get("SECRET_KEY"):
+    app.secret_key = os.environ["SECRET_KEY"]
+else:
+    if not os.path.exists(_key_file):
+        with open(_key_file, "w") as f:
+            f.write(secrets.token_hex(32))
+    with open(_key_file) as f:
+        app.secret_key = f.read().strip()
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+
+accounts.init(STORE.data_dir)
+# First admin account. Change the password after the first login (Profile page).
+ADMIN_USERNAME = os.environ.get("CUISYNC_ADMIN_USER", "admin")
+ADMIN_PASSWORD = os.environ.get("CUISYNC_ADMIN_PASSWORD", "cuisync-admin")
+if accounts.ensure_admin(ADMIN_USERNAME, ADMIN_PASSWORD):
+    print(f"[CuiSync] Admin account created: {ADMIN_USERNAME} / {ADMIN_PASSWORD} (change it on the Profile page)")
+
+# GPT prompts the admin saved
+cuisync_prompts.set_system_prompt(STORE.get_prompt("explanation", ""))
+cultural_info.init(
+    STORE.data_dir,
+    lambda: STORE.get_prompt("cultural", cultural_info.DEFAULT_PROMPT),
+    explainer._client,
+    explainer.MODEL_NAME,
+)
+
+
+def reload_data():
+    """Rebuild everything that depends on the dataset after the admin changes it."""
+    global RECIPES, MATCHER, INGREDIENT_SEARCH
+    with STORE.lock:
+        RECIPES = STORE.recipes
+        MATCHER = build_matcher()
+        INGREDIENT_SEARCH = search_tools.IngredientSearch(MATCHER)
+        feature_scores_for_source.cache_clear()
+        init_explainer(RECIPES, parse_items)
+    return STORE.missing_vectors
+
+
+def current_user():
+    if "user" not in g:
+        uid = session.get("user_id")
+        g.user = accounts.get_user(uid) if uid else None
+        if uid and g.user is None:
+            session.pop("user_id", None)
+    return g.user
+
+
+def login_required(view):
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        if not current_user():
+            flash("Please log in first.", "info")
+            return redirect(url_for("login", next=request.full_path))
+        return view(*args, **kwargs)
+    return wrapper
+
+
+def admin_required(view):
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        user = current_user()
+        if not user:
+            return redirect(url_for("login", next=request.full_path))
+        if not user["is_admin"]:
+            abort(403)
+        return view(*args, **kwargs)
+    return wrapper
+
+
+app.jinja_env.filters["fromjson"] = lambda text: json.loads(text or "{}")
+
+
+@app.context_processor
+def inject_globals():
+    return {
+        "current_user": current_user(),
+        "countries": STORE.dropdown_countries(),
+        "country_label": STORE.label_of,
+        # Tag groups for the "Search by tag" tab (only built when the template asks)
+        "home_tag_groups": lambda: search_tools.all_tags(RECIPES, STORE.region_of)[0],
+    }
+
+
+def save_history(**entry):
+    user = current_user()
+    if user:
+        try:
+            accounts.add_history(user["id"], **entry)
+        except Exception as error:  # history must never break a search
+            app.logger.warning("Could not save search history: %s", error)
+
+
+def dish_card(idx, score=None, found=None):
+    """Small dict for the Explore page cards."""
+    r = RECIPES[idx]
+    return {
+        "idx": idx,
+        "recipe_id": r.get("recipe_id"),
+        "title": (r.get("title") or "").strip(),
+        "alternative_title": (r.get("alternative_title") or "").strip(),
+        "country": r["country"],
+        "country_label": STORE.label_of(r["country"]),
+        "country_value": r["country"].lower(),
+        "region": r.get("country_region") or STORE.region_of(r["country"]),
+        "image_link": r.get("image_link") or "",
+        "tags": search_tools.recipe_tags(r, STORE.region_of),
+        "score": None if score is None else round(score * 100),
+        "found": found or [],
+        "ingredients": parse_items(r.get("ingredient_text", ""))[:8],
+    }
+
+
 def format_recipe_url(link):
     """Add https:// to recipe links that don't have it."""
     if not link:
@@ -144,7 +286,8 @@ def home():
 
 
 # Search logic: find the closest dish in the target country
-def low_similarity_page(message, score, dish_title, origin_country, target_country, recipe_id=None):
+def low_similarity_page(message, score, dish_title, origin_country, target_country, recipe_id=None,
+                        ingredients=""):
     """Back to the search page with the low similarity popup.
     "View results anyway" sends the same search again with force=1.
     """
@@ -156,6 +299,7 @@ def low_similarity_page(message, score, dish_title, origin_country, target_count
         warn_origin=origin_country,
         warn_target=target_country,
         warn_recipe_id="" if recipe_id is None else recipe_id,
+        warn_ingredients=ingredients or "",
     )
 
 
@@ -188,7 +332,32 @@ def feature_scores_for_source(source_idx):
     return {name: MATCHER.scores(name, source_idx) for name in WEIGHTS}
 
 
-def get_search_results(dish_name, origin_country, target_country, force=False, recipe_id=None):
+ANY_COUNTRY = "any"
+
+
+def ingredient_filter(ingredients, target_country, exclude_idx):
+    """Ingredient search with a specific target country: only the target country's dishes
+    that use the ingredients can be recommended. Dishes that use ALL the ingredients are kept;
+    if none do, the ones that use the most of them.
+    Returns (allowed indices, ingredient names that were understood).
+    """
+    wanted = [w for w in split_names(ingredients) if w]
+    results, unknown = INGREDIENT_SEARCH.search(RECIPES, wanted, target_country, limit=len(RECIPES))
+    results = [r for r in results if r[0] != exclude_idx]
+    known = [w for w in wanted if w not in unknown]
+    if not results:
+        return [], known
+    most = max(len(found) for _, _, found in results)
+    return [idx for idx, _, found in results if len(found) == most], known
+
+
+def get_search_results(dish_name, origin_country, target_country, force=False, recipe_id=None,
+                       search_type="text", ingredients=""):
+    # "Any" target country (panel revision): look in every country except the dish's own.
+    # No target at all (the tag search has none) also means "Any".
+    if not (target_country or "").strip():
+        target_country = ANY_COUNTRY
+    target_any = normalize_name(target_country) == ANY_COUNTRY
 
 
     # Find the searched dish (same name and origin country)
@@ -244,11 +413,37 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
     total_scores = blend_scores(per_feature)
 
     # Don't let the dish match itself (happens when origin and target are the same country)
-    target_indices = [
-        index
-        for index, recipe in enumerate(RECIPES)
-        if recipe["country"].lower() == target_country.lower() and index != source_idx
-    ]
+    if target_any:
+        target_indices = [
+            index
+            for index, recipe in enumerate(RECIPES)
+            if recipe["country"].lower() != source_dish["country"].lower()
+        ]
+    else:
+        target_indices = [
+            index
+            for index, recipe in enumerate(RECIPES)
+            if recipe["country"].lower() == target_country.lower() and index != source_idx
+        ]
+    if not target_indices and target_any:
+        return no_result_page("Our dataset has no recipes from other countries to compare with.")
+
+    # Ingredient search with a specific target country (panel revision)
+    ingredient_note = ""
+    ingredients = (ingredients or "").strip()
+    if ingredients and not target_any and target_indices:
+        allowed, known = ingredient_filter(ingredients, target_country, source_idx)
+        target_indices = [i for i in target_indices if i in set(allowed)]
+        if not target_indices:
+            return no_result_page(
+                f"No dish from {STORE.label_of(target_country.upper())} in our dataset uses "
+                f"{', '.join(known) or ingredients}, so there is nothing to compare with. "
+                'Try other ingredients or choose "Any country".',
+                error_title="No Matching Dishes",
+            )
+        ingredient_note = (f"Only {STORE.label_of(target_country.upper())} dishes that use "
+                           f"{', '.join(known)} were compared ({len(target_indices)} "
+                           f"dish{'es' if len(target_indices) != 1 else ''}).")
     if not target_indices:
         if origin_country.lower() == target_country.lower():
             return no_result_page(
@@ -263,20 +458,24 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
         target_indices, key=lambda index: total_scores[index], reverse=True
     )
     best_index = ordered_targets[0]
+    if target_any:
+        # From here on the target is the country of the best match
+        target_country = RECIPES[best_index]["country"]
 
 
 
     # Score too low: go back and ask the user first instead of loading the results
     if total_scores[best_index] < SIMILARITY_THRESHOLD and not force:
         return low_similarity_page(
-            f'No dish from {target_country.title()} in our dataset is similar enough to '
+            f'No dish from {"any other country" if target_any else target_country.title()} in our dataset is similar enough to '
             f'"{source_dish["title"]}" to recommend (closest match is only '
             f"{total_scores[best_index] * 100:.0f}% similar).",
             float(total_scores[best_index]) * 100,
             source_dish["title"],
             source_dish["country"],
-            target_country,
+            ANY_COUNTRY if target_any else target_country,
             source_dish.get("recipe_id"),
+            ingredients,
         )
 
     similarity_score = round(float(total_scores[best_index]) * 100, 2)
@@ -302,7 +501,7 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
         dish["recipe_link"] = format_recipe_url(dish.get("recipe_link", ""))
         regional_variations.append(dish)
 
-    seen_countries = {target_country.lower(), origin_country.lower()}
+    seen_countries = {target_country.lower(), origin_country.lower(), source_dish["country"].lower()}
     for index in np.argsort(total_scores)[::-1]:
         recipe = RECIPES[index]
         recipe_country = recipe["country"].lower()
@@ -380,11 +579,27 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
         key: round(value * 100) for key, value in WEIGHTS.items()
     }
 
+    save_history(
+        search_type=search_type,
+        dish_name=source_dish["title"].strip(),
+        origin_country=source_dish["country"],
+        target_country=ANY_COUNTRY if target_any else target_country,
+        recipe_id=source_dish.get("recipe_id"),
+        result_title=recommended_dish["title"].strip(),
+        result_country=recommended_dish["country"],
+        score=similarity_score,
+        query=json.dumps({"ingredients": ingredients}) if ingredients else "",
+    )
+
+    user = current_user()
     return render_template(
         "results.html",
         source_dish=source_dish,
         recommended_dish=recommended_dish,
         target_country=target_country,
+        target_any=target_any,
+        ingredient_note=ingredient_note,
+        avoid_allergens=(user or {}).get("avoid_allergens", []),
         entities=entities,
         similarity_score=similarity_score,
         feature_weights=feature_weights,
@@ -448,6 +663,7 @@ def search_text():
         request.form.get("target_country", "").strip(),
         force=request.form.get("force") == "1",
         recipe_id=request.form.get("recipe_id", "").strip() or None,
+        ingredients=request.form.get("ingredients", "") if request.form.get("search_mode") == "ingredients" else "",
     )
 
 
@@ -510,7 +726,8 @@ def search_image():
     try:
         # Dish already picked, so we don't need the photo again (the browser clears it after going back)
         if extracted_dish_name and origin_country:
-            return get_search_results(extracted_dish_name, origin_country, target_country)
+            return get_search_results(extracted_dish_name, origin_country, target_country,
+                                      search_type="image")
 
         if "dish_image" not in request.files:
             return render_template("index.html", error_title="No Recipe Record", error_desc="No image file was uploaded.")
@@ -538,7 +755,7 @@ def search_image():
             return render_template("index.html", error_title="No Recipe Record", error_desc="The uploaded image does not contain a recipe name found in our dataset.")
         recipe = matches[0]
         return get_search_results(recipe["title"], recipe["country"], target_country,
-                                  recipe_id=recipe.get("recipe_id"))
+                                  recipe_id=recipe.get("recipe_id"), search_type="image")
     except Exception as error:
         return render_template("index.html", error_title="Processing Error", error_desc=f"An error occurred while processing the image: {error}")
 
@@ -579,9 +796,9 @@ def normalize_analysis_country(country):
 
 
 def get_analysis_region(country):
-    return COUNTRY_REGIONS.get(
-        normalize_analysis_country(country),
-        "Other Asia"
+    # Regions come from the admin's country list (falls back to the table above)
+    return STORE.region_of(normalize_analysis_country(country)) or COUNTRY_REGIONS.get(
+        normalize_analysis_country(country), "Other Asia"
     )
 
 def get_analysis_countries():
@@ -782,6 +999,501 @@ def analysis_instructions():
 @app.route("/faqs")
 def faqs():
     return render_template("faqs.html")
+
+
+
+# ==========================================================================
+#  PANEL REVISIONS: routes
+# ==========================================================================
+
+# ---------------- accounts (Oab 2-3, Galang 5-6) ----------------
+def _safe_next(target):
+    return target if target and target.startswith("/") and not target.startswith("//") else url_for("home")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        user = accounts.authenticate(request.form.get("username"), request.form.get("password"))
+        if user:
+            session.clear()
+            session["user_id"] = user["id"]
+            session.permanent = True
+            flash(f"Welcome back, {user['name']}!", "success")
+            default = url_for("admin_page") if user["is_admin"] else url_for("home")
+            nxt = request.form.get("next")
+            return redirect(_safe_next(nxt) if nxt else default)
+        flash("Wrong username or password.", "error")
+    return render_template("auth.html", mode="login", next=request.args.get("next", ""))
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        if request.form.get("password") != request.form.get("confirm"):
+            flash("The two passwords don't match.", "error")
+        else:
+            try:
+                uid = accounts.create_user(request.form.get("username"), request.form.get("password"),
+                                           display_name=request.form.get("display_name", ""))
+                session.clear()
+                session["user_id"] = uid
+                flash("Your account is ready. Set up your profile below.", "success")
+                return redirect(url_for("profile"))
+            except ValueError as error:
+                flash(str(error), "error")
+    return render_template("auth.html", mode="register", next="")
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    flash("You are logged out.", "info")
+    return redirect(url_for("home"))
+
+
+@app.route("/profile", methods=["GET", "POST"])
+@login_required
+def profile():
+    user = current_user()
+    if request.method == "POST":
+        accounts.update_profile(user["id"], request.form)
+        flash("Profile saved.", "success")
+        return redirect(url_for("profile"))
+    return render_template(
+        "profile.html",
+        user=user,
+        history=accounts.get_history(user["id"]),
+        cooking_roles=accounts.COOKING_ROLES,
+        allergen_choices=accounts.ALLERGEN_CHOICES,
+        all_countries=STORE.countries,
+    )
+
+
+@app.route("/profile/password", methods=["POST"])
+@login_required
+def change_password():
+    try:
+        accounts.change_password(current_user()["id"], request.form.get("old"), request.form.get("new"))
+        flash("Password changed.", "success")
+    except ValueError as error:
+        flash(str(error), "error")
+    return redirect(url_for("profile") + "#account")
+
+
+@app.route("/history/<int:entry_id>")
+@login_required
+def open_history(entry_id):
+    """Open a past search again (Oab 3: users can go back to past searches)."""
+    entry = accounts.get_history_entry(current_user()["id"], entry_id)
+    if not entry:
+        abort(404)
+    if entry["search_type"] in ("text", "image"):
+        saved = json.loads(entry["query"] or "{}") if (entry["query"] or "").startswith("{") else {}
+        return get_search_results(entry["dish_name"], entry["origin_country"], entry["target_country"],
+                                  force=True, recipe_id=entry["recipe_id"] or None,
+                                  search_type=entry["search_type"], ingredients=saved.get("ingredients", ""))
+    params = json.loads(entry["query"] or "{}")
+    if params.get("mode") == "tags":
+        return redirect(url_for("home", mode="tags", tag=params.get("tag", [])) + "#search-section")
+    if params.get("mode") in ("ingredients", "keyword"):
+        return redirect(url_for("home", mode="ingredients" if params["mode"] == "ingredients" else "dish",
+                                q=params.get("q", "")) + "#search-section")
+    return redirect(url_for("explore", **params))
+
+
+@app.route("/history/<int:entry_id>/delete", methods=["POST"])
+@login_required
+def delete_history(entry_id):
+    accounts.delete_history(current_user()["id"], entry_id)
+    return redirect(url_for("profile") + "#history")
+
+
+@app.route("/history/clear", methods=["POST"])
+@login_required
+def clear_history():
+    accounts.delete_history(current_user()["id"])
+    flash("Search history cleared.", "info")
+    return redirect(url_for("profile") + "#history")
+
+
+@app.route("/api/me")
+def api_me():
+    user = current_user()
+    if not user:
+        return jsonify({"logged_in": False})
+    return jsonify({"logged_in": True, "name": user["name"], "is_admin": user["is_admin"]})
+
+
+# ---------------- explore: keyword, ingredient and tag search (Galang 1, 4, 7; Oab 6) ----------------
+@app.route("/api/find-dishes")
+def api_find_dishes():
+    """Dishes for the popup of the text search (dish name or ingredients).
+    mode=dish: every dish whose name contains the keyword ("adobo" -> all adobo dishes)
+    mode=ingredients: dishes that use the ingredients + the cuisines you could cook
+    """
+    mode = request.args.get("mode", "dish")
+    q = request.args.get("q", "").strip()
+    if not q:
+        return jsonify({"dishes": [], "total": 0})
+    if mode == "ingredients":
+        wanted = [w for w in split_names(q) if w]
+        # A specific target country: only that country's dishes that use the ingredients
+        country = request.args.get("country", "").strip().lower()
+        if country == ANY_COUNTRY:
+            country = ""
+        results, unknown = INGREDIENT_SEARCH.search(RECIPES, wanted, country, limit=60)
+        if country and results:
+            most = max(len(found) for _, _, found in results)
+            results = [r for r in results if len(r[2]) == most]
+        cuisines = [] if country else search_tools.possible_cuisines(RECIPES, results, STORE.label_of)
+        save_history(search_type="ingredients", query=json.dumps({"mode": "ingredients", "q": q}),
+                     result_title=f"{len(results)} dishes")
+        return jsonify({
+            "mode": "ingredients",
+            "total": len(results),
+            "unknown": unknown,
+            "cuisines": cuisines,
+            "country": country,
+            "country_label": STORE.label_of(country.upper()) if country else "",
+            "dishes": [dish_card(idx, score, found) for idx, score, found in results],
+        })
+    if mode == "tags":
+        tags = [t for t in q.split("|") if t]
+        results = search_tools.tag_search(RECIPES, tags, "", STORE.region_of)
+        save_history(search_type="tags", query=json.dumps({"mode": "tags", "tag": tags}),
+                     result_title=f"{len(results)} dishes")
+        return jsonify({
+            "mode": "tags",
+            "tags": tags,
+            "total": len(results),
+            "dishes": [dish_card(idx) for idx, _, _ in results[:60]],
+        })
+    results = search_tools.keyword_search(RECIPES, q, "", recipe_names)
+    return jsonify({
+        "mode": "dish",
+        "total": len(results),
+        "close_spelling": bool(results) and results[0][1] == 9,
+        "dishes": [dish_card(idx) for idx, _, _ in results[:60]],
+    })
+
+
+@app.route("/explore")
+def explore():
+    mode = request.args.get("mode", "tags")
+    if mode in ("keyword", "ingredients"):
+        # Dish and ingredient search now live in the home page search bar
+        return redirect(url_for("home", mode="dish" if mode == "keyword" else "ingredients",
+                                q=request.args.get("q", "")) + "#search-section")
+    # Tag search is now the "Search by tag" tab on the home page
+    return redirect(url_for("home", mode="tags", tag=request.args.getlist("tag")) + "#search-section")
+    mode = "tags"
+    q = request.args.get("q", "").strip()
+    country = request.args.get("country", "").strip()
+    chosen_tags = [t for t in request.args.getlist("tag") if t]
+    tag_groups, _ = search_tools.all_tags(RECIPES, STORE.region_of)
+
+    results, unknown, cuisines, searched = [], [], [], False
+    if mode == "keyword" and q:
+        searched = True
+        results = search_tools.keyword_search(RECIPES, q, country, recipe_names)
+    elif mode == "ingredients" and q:
+        searched = True
+        wanted = [w for w in split_names(q) if w]
+        results, unknown = INGREDIENT_SEARCH.search(RECIPES, wanted, country)
+        cuisines = search_tools.possible_cuisines(RECIPES, results, STORE.label_of)
+    elif mode == "tags" and chosen_tags:
+        searched = True
+        results = search_tools.tag_search(RECIPES, chosen_tags, country, STORE.region_of)
+
+    if searched:
+        params = {"mode": mode}
+        if q:
+            params["q"] = q
+        if country:
+            params["country"] = country
+        if chosen_tags:
+            params["tag"] = chosen_tags
+        save_history(
+            search_type=mode if mode != "tags" else "tags",
+            query=json.dumps(params, ensure_ascii=False),
+            dish_name="",
+            origin_country=country,
+            result_title=f"{len(results)} dishes",
+        )
+
+    page_size = 48
+    try:
+        shown = max(int(request.args.get("show", page_size)), page_size)
+    except ValueError:
+        shown = page_size
+    more_args = request.args.to_dict(flat=False)
+    more_args["show"] = [shown + page_size]
+    close_spelling = mode == "keyword" and bool(results) and results[0][1] == 9
+    cards = [dish_card(idx, score if mode == "ingredients" else None, found)
+             for idx, score, found in results[:shown]]
+    return render_template(
+        "explore.html",
+        mode=mode, q=q, country=country, chosen_tags=chosen_tags, tag_groups=tag_groups,
+        cards=cards, total=len(results), shown=shown, page_size=page_size,
+        unknown=unknown, cuisines=cuisines, searched=searched,
+        close_spelling=close_spelling, more_url=url_for("explore", **more_args),
+        avoid_allergens=(current_user() or {}).get("avoid_allergens", []),
+    )
+
+
+@app.route("/api/ingredients")
+def api_ingredients():
+    """Ingredient names for the autocomplete on the Explore page."""
+    counts = INGREDIENT_SEARCH.df
+    names = sorted(((INGREDIENT_SEARCH.items[i], c) for i, c in counts.items()), key=lambda x: -x[1])
+    # [name, number of dishes that use it], most used first
+    return jsonify([[n, c] for n, c in names[:1500]])
+
+
+# ---------------- cultural information (Oab 4) ----------------
+@app.route("/api/dish-info/<int:idx>")
+def api_dish_info(idx):
+    if not 0 <= idx < len(RECIPES):
+        return jsonify({"error": "invalid recipe index"}), 404
+    recipe = RECIPES[idx]
+    info = cultural_info.dish_info(recipe, STORE.region_of(recipe["country"]), STORE.label_of(recipe["country"]))
+    info["tags"] = search_tools.recipe_tags(recipe, STORE.region_of)
+    user = current_user()
+    avoid = set((user or {}).get("avoid_allergens", []))
+    for a in info["allergens"]:
+        a["avoid"] = a["name"] in avoid
+    return jsonify(info)
+
+
+# ---------------- admin (Oab 1, 2, 5; Galang 3) ----------------
+ADMIN_TABS = ("overview", "dishes", "countries", "dataset", "prompts", "users")
+
+
+@app.route("/admin")
+@admin_required
+def admin_page():
+    tab = request.args.get("tab", "overview")
+    if tab not in ADMIN_TABS:
+        tab = "overview"
+    ctx = {"tab": tab, "store": STORE, "regions": REGION_CHOICES}
+    if tab == "overview":
+        per_country = {}
+        for r in RECIPES:
+            per_country[r["country"]] = per_country.get(r["country"], 0) + 1
+        ctx.update(stats=accounts.history_stats(), per_country=per_country, total=len(RECIPES),
+                   missing=STORE.missing_vectors, gpt_on=explainer._client is not None)
+    elif tab == "dishes":
+        q = request.args.get("q", "").strip()
+        country = request.args.get("country", "").strip().upper()
+        rows = [
+            (i, r) for i, r in enumerate(RECIPES)
+            if (not country or r["country"] == country)
+            and (not q or normalize_name(q) in normalize_name(f"{r.get('title')} {r.get('alternative_title')} {r.get('ingredient_text')}"))
+        ]
+        page = max(int(request.args.get("page", 1) or 1), 1)
+        per_page = 40
+        ctx.update(q=q, country=country, total=len(rows), page=page,
+                   pages=max((len(rows) - 1) // per_page + 1, 1),
+                   rows=rows[(page - 1) * per_page: page * per_page])
+    elif tab == "countries":
+        counts = {}
+        for r in RECIPES:
+            counts[r["country"]] = counts.get(r["country"], 0) + 1
+        ctx.update(counts=counts)
+    elif tab == "prompts":
+        ctx.update(
+            explanation_prompt=cuisync_prompts.get_system_prompt(),
+            explanation_custom=bool(STORE.prompts.get("explanation")),
+            cultural_prompt=STORE.get_prompt("cultural", cultural_info.DEFAULT_PROMPT),
+            cultural_custom=bool(STORE.prompts.get("cultural")),
+            gpt_on=explainer._client is not None,
+        )
+    elif tab == "users":
+        ctx.update(users=accounts.list_users(), me=current_user())
+    return render_template("admin.html", **ctx)
+
+
+def _after_data_change(message):
+    missing = reload_data()
+    if missing:
+        sample = ", ".join(item for _, item in missing[:6])
+        flash(f"{message} Note: {len(missing)} new item(s) had no close match in the vectors "
+              f"({sample}{'...' if len(missing) > 6 else ''}), so they can't add to similarity until "
+              "the vectorizer is run again.", "info")
+    else:
+        flash(message, "success")
+
+
+@app.route("/admin/dishes/new", methods=["GET", "POST"])
+@app.route("/admin/dishes/<recipe_id>/edit", methods=["GET", "POST"])
+@admin_required
+def admin_dish_form(recipe_id=None):
+    dish = {}
+    if recipe_id is not None:
+        idx = STORE.find_index(recipe_id)
+        if idx is None:
+            abort(404)
+        dish = RECIPES[idx]
+    if request.method == "POST":
+        try:
+            if recipe_id is None:
+                saved = STORE.add_dish(request.form)
+                _after_data_change(f'Added "{saved["title"]}".')
+            else:
+                saved = STORE.update_dish(recipe_id, request.form)
+                _after_data_change(f'Saved "{saved["title"]}".')
+            return redirect(url_for("admin_page", tab="dishes", q=saved["title"]))
+        except ValueError as error:
+            flash(str(error), "error")
+            dish = dict(request.form.items())
+    return render_template("admin_dish.html", dish=dish, recipe_id=recipe_id, fields=DISH_FIELDS,
+                           all_countries=STORE.countries, store=STORE, regions=REGION_CHOICES)
+
+
+@app.route("/admin/dishes/<recipe_id>/delete", methods=["POST"])
+@admin_required
+def admin_dish_delete(recipe_id):
+    try:
+        removed = STORE.delete_dish(recipe_id)
+        _after_data_change(f'Deleted "{removed["title"]}".')
+    except ValueError as error:
+        flash(str(error), "error")
+    return redirect(request.referrer or url_for("admin_page", tab="dishes"))
+
+
+@app.route("/admin/countries/add", methods=["POST"])
+@admin_required
+def admin_country_add():
+    try:
+        STORE.add_country(request.form.get("label"), request.form.get("region"))
+        flash(f"Added {request.form.get('label')}. It shows in the dropdowns once it has a dish.", "success")
+    except ValueError as error:
+        flash(str(error), "error")
+    return redirect(url_for("admin_page", tab="countries"))
+
+
+@app.route("/admin/countries/<name>/update", methods=["POST"])
+@admin_required
+def admin_country_update(name):
+    try:
+        if STORE.update_country(name, request.form.get("label"), request.form.get("region"),
+                                request.form.get("visible") == "on"):
+            reload_data()
+        flash("Country saved.", "success")
+    except ValueError as error:
+        flash(str(error), "error")
+    return redirect(url_for("admin_page", tab="countries"))
+
+
+@app.route("/admin/countries/<name>/delete", methods=["POST"])
+@admin_required
+def admin_country_delete(name):
+    try:
+        STORE.remove_country(name)
+        flash("Country removed.", "success")
+    except ValueError as error:
+        flash(str(error), "error")
+    return redirect(url_for("admin_page", tab="countries"))
+
+
+@app.route("/admin/dataset/upload", methods=["POST"])
+@admin_required
+def admin_dataset_upload():
+    file = request.files.get("dataset")
+    mode = "replace" if request.form.get("mode") == "replace" else "append"
+    if not file or not file.filename:
+        flash("Choose a .json or .csv file first.", "error")
+        return redirect(url_for("admin_page", tab="dataset"))
+    try:
+        raw = file.read().decode("utf-8-sig")
+        if file.filename.lower().endswith(".csv"):
+            records = list(csv.DictReader(io.StringIO(raw)))
+        else:
+            records = json.loads(raw)
+            if isinstance(records, dict):
+                records = records.get("recipes") or [records]
+        if not isinstance(records, list):
+            raise ValueError("The file must contain a list of dishes.")
+        count = STORE.import_dataset(records, mode)
+        _after_data_change(f"{'Replaced the dataset with' if mode == 'replace' else 'Added'} {count} dishes.")
+    except (ValueError, UnicodeDecodeError, csv.Error) as error:
+        flash(f"Upload failed: {error}", "error")
+    return redirect(url_for("admin_page", tab="dataset"))
+
+
+@app.route("/admin/dataset/download")
+@admin_required
+def admin_dataset_download():
+    if request.args.get("format") == "csv":
+        out = io.StringIO()
+        fields = ["recipe_id"] + list(DISH_FIELDS)
+        writer = csv.DictWriter(out, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        for r in RECIPES:
+            writer.writerow({k: ("" if r.get(k) is None else r.get(k)) for k in fields})
+        return Response(out.getvalue(), mimetype="text/csv",
+                        headers={"Content-Disposition": "attachment; filename=cuisync_dataset.csv"})
+    return Response(json.dumps(RECIPES, ensure_ascii=False, indent=1), mimetype="application/json",
+                    headers={"Content-Disposition": "attachment; filename=cuisync_dataset.json"})
+
+
+@app.route("/admin/dataset/reset", methods=["POST"])
+@admin_required
+def admin_dataset_reset():
+    STORE.reset_to_original()
+    reload_data()
+    flash("The dataset is back to the original recipes.json (your edited copy was kept as a .bak file).", "success")
+    return redirect(url_for("admin_page", tab="dataset"))
+
+
+@app.route("/admin/prompts", methods=["POST"])
+@admin_required
+def admin_prompts():
+    which = request.form.get("which")
+    if which not in ("explanation", "cultural"):
+        abort(400)
+    text = "" if request.form.get("action") == "reset" else request.form.get("prompt", "")
+    if which == "explanation" and text.strip() == cuisync_prompts.DEFAULT_SYSTEM_PROMPT.strip():
+        text = ""
+    if which == "cultural" and text.strip() == cultural_info.DEFAULT_PROMPT.strip():
+        text = ""
+    STORE.set_prompt(which, text)
+    if which == "explanation":
+        cuisync_prompts.set_system_prompt(text)
+    flash("Prompt reset to the default." if not text else "Prompt saved. New searches use it right away.", "success")
+    return redirect(url_for("admin_page", tab="prompts"))
+
+
+@app.route("/admin/users/<int:user_id>/role", methods=["POST"])
+@admin_required
+def admin_user_role(user_id):
+    try:
+        accounts.set_role(user_id, request.form.get("role"))
+        flash("Role updated.", "success")
+    except ValueError as error:
+        flash(str(error), "error")
+    return redirect(url_for("admin_page", tab="users"))
+
+
+@app.route("/admin/users/<int:user_id>/delete", methods=["POST"])
+@admin_required
+def admin_user_delete(user_id):
+    if user_id == current_user()["id"]:
+        flash("You can't delete your own account here.", "error")
+    else:
+        try:
+            accounts.delete_user(user_id)
+            flash("User deleted.", "success")
+        except ValueError as error:
+            flash(str(error), "error")
+    return redirect(url_for("admin_page", tab="users"))
+
+
+@app.errorhandler(403)
+def forbidden(_error):
+    return render_template("auth.html", mode="login", next="",
+                           forbidden="Only admins can open that page."), 403
 
 
 if __name__ == "__main__":

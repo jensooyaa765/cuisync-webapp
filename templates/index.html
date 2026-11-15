@@ -12,10 +12,12 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/base-style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/similarity-warning.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/panel.css') }}">
 </head>
 <body>
 
   <app-nav></app-nav>
+  {% include "partials/flash.html" %}
 
   <!-- ==================================
        HERO BANNER
@@ -46,17 +48,30 @@
       </div>
 
       <h2 class="section-title">DISCOVER ASIAN<br>CUISINE SIMILARITIES</h2>
-      <p class="section-subtitle">Search for similarities using text input or image</p>
+      <p class="section-subtitle">Search for similarities using text, tags or an image</p>
+      <p class="more-search-links">
+        {% if current_user %}<a href="/profile#history">My search history</a>{% else %}<a href="/login">Log in to save your searches</a>{% endif %}
+      </p>
 
       <div class="tab-toggle">
         <button type="button" class="tab-btn active" id="btn-text-tab" onclick="switchTab('text')">SEARCH BY TEXT</button>
+        <button type="button" class="tab-btn" id="btn-tag-tab" onclick="switchTab('tag')">SEARCH BY TAG</button>
         <button type="button" class="tab-btn" id="btn-image-tab" onclick="switchTab('image')">SEARCH BY IMAGE</button>
       </div>
 
       <!-- TEXT SEARCH FORM -->
       <form class="search-form active" id="text-search-form" action="/search-text" method="POST">
         
-        <div class="form-group full-width">
+        <!-- Search by dish name or by ingredients (panel revisions) -->
+        <input type="hidden" name="search_mode" id="text-search-mode" value="dish">
+        <!-- Ingredients sent with the search, so the target country only uses dishes that have them -->
+        <input type="hidden" name="ingredients" id="text-search-ingredients">
+        <div class="search-mode-toggle" role="tablist" aria-label="Search by">
+          <button type="button" class="search-mode-btn active" data-mode="dish" role="tab" aria-selected="true">DISH</button>
+          <button type="button" class="search-mode-btn" data-mode="ingredients" role="tab" aria-selected="false">INGREDIENTS</button>
+        </div>
+
+        <div class="form-group full-width" id="dish-mode-group">
           <label for="dish-name-input">DISH NAME</label>
           <div class="search-dropdown-wrapper">
             <input 
@@ -67,50 +82,61 @@
               autocomplete="off" 
               required
             />
+            <!-- Inside the search bar: reopen the popup / clear the dish -->
+            <div class="dish-input-actions">
+              <button type="button" id="dish-change-btn" class="dish-change-btn" hidden>Click to change</button>
+              <button type="button" id="dish-clear-btn" class="dish-clear-btn" aria-label="Clear dish name" hidden>&times;</button>
+            </div>
             <ul id="dish-dropdown-list" class="dropdown-list hidden"></ul>
             <!-- The exact recipe picked from the list (some recipes share a name) -->
             <input type="hidden" name="recipe_id" id="dish-recipe-id">
           </div>
         </div>
 
+        <div class="form-group full-width" id="ingredient-mode-group" hidden>
+          <label for="ingredient-entry">INGREDIENTS <span class="label-hint">(press Enter or comma after each one)</span></label>
+          <div class="search-dropdown-wrapper">
+            <div class="ingredient-chip-input" id="ingredient-chip-input">
+              <div class="ingredient-chips" id="ingredient-chips"></div>
+              <input type="text" id="ingredient-entry"
+                     placeholder="Example: chicken, garlic, soy sauce" autocomplete="off">
+            </div>
+            <!-- Same dropdown as the dish name -->
+            <ul id="ingredient-dropdown-list" class="dropdown-list hidden"></ul>
+          </div>
+        </div>
+
+        <!-- Dish picked from the popup -->
+        <button type="button" id="text-selected-dish" class="selected-dish-card" style="display: none;" aria-label="Change selected dish">
+          <div class="selected-dish-info">
+            <span class="selected-dish-label">SELECTED DISH</span>
+            <strong id="text-selected-name"></strong>
+            <span id="text-selected-alt" class="selected-dish-alt-name"></span>
+            <span id="text-selected-country" class="selected-dish-country"></span>
+            <span class="selected-dish-change">Click to change</span>
+          </div>
+          <img id="text-selected-image" class="selected-dish-image" alt="" />
+        </button>
+
         <div class="form-row">
-          <div class="form-group half-width">
-            <label for="text-origin">COUNTRY OF ORIGIN</label>
-            <select id="text-origin" name="origin_country" required>
-              <option value="" disabled selected>Select country of origin...</option>
-              <option value="cambodia">Cambodia</option>
-              <option value="china">China</option>
-              <option value="india">India</option>
-              <option value="indonesia">Indonesia</option>
-              <option value="japan">Japan</option>
-              <option value="malaysia">Malaysia</option>
-              <option value="myanmar">Myanmar</option>
-              <option value="philippines">Philippines</option>
-              <option value="saudi arabia">Saudi Arabia</option>
-              <option value="south korea">South Korea</option>
-              <option value="thailand">Thailand</option>
-              <option value="turkiye">Turkey</option>
-              <option value="vietnam">Vietnam</option>
+          <!-- Hidden in ingredient mode: the origin comes from the dish picked in the popup -->
+          <div class="form-group half-width" id="text-origin-group">
+            <label id="text-origin-label">COUNTRY OF ORIGIN</label>
+            <!-- Filled in from the chosen dish (same as the image search). The hidden select sends the value. -->
+            <div id="text-origin-display" class="origin-display is-placeholder"
+                 role="status" aria-live="polite" aria-labelledby="text-origin-label">Country of Origin</div>
+            <select id="text-origin" name="origin_country" class="origin-select-hidden" tabindex="-1" aria-hidden="true">
+              <option value="" disabled selected>Country of Origin</option>
+              {% for c in countries %}<option value="{{ c.value }}">{{ c.label }}</option>{% endfor %}
             </select>
           </div>
 
-          <div class="form-group half-width">
+          <div class="form-group half-width" id="text-target-group">
             <label for="text-target">TARGET COUNTRY</label>
             <select id="text-target" name="target_country" required>
               <option value="" disabled selected>Select target country...</option>
-              <option value="cambodia">Cambodia</option>
-              <option value="china">China</option>
-              <option value="india">India</option>
-              <option value="indonesia">Indonesia</option>
-              <option value="japan">Japan</option>
-              <option value="malaysia">Malaysia</option>
-              <option value="myanmar">Myanmar</option>
-              <option value="philippines">Philippines</option>
-              <option value="saudi arabia">Saudi Arabia</option>
-              <option value="south korea">South Korea</option>
-              <option value="thailand">Thailand</option>
-              <option value="turkiye">Turkey</option>
-              <option value="vietnam">Vietnam</option>
+              <option value="any">Any country (best match)</option>
+              {% for c in countries %}<option value="{{ c.value }}">{{ c.label }}</option>{% endfor %}
             </select>
           </div>
         </div>
@@ -121,6 +147,42 @@
             based on its ingredients and cooking processes
           </p>
           <button type="submit" class="btn btn-red">SEARCH THE DISH</button>     
+        </div>
+      </form>
+
+      <!-- TAG SEARCH FORM (panel revision: search by tags) -->
+      <form class="search-form" id="tag-search-form" action="/search-text" method="POST" novalidate>
+        <input type="hidden" name="search_mode" value="tags">
+        <input type="hidden" name="dish_name" id="tag-dish-name">
+        <input type="hidden" name="recipe_id" id="tag-recipe-id">
+
+        <div class="form-group full-width">
+          <label>TAGS <span class="label-hint">(pick one or more; dishes must have all of them)</span></label>
+          <div class="home-tag-picker" id="home-tag-picker">
+            {% for group, tags in home_tag_groups().items() %}
+            <div class="home-tag-group">
+              <span class="home-tag-group-name">{{ group }}</span>
+              <div class="home-tag-options">
+                {% for t, n in tags %}
+                <label class="tag-toggle"><input type="checkbox" value="{{ t }}"><span>{{ t }} <small>{{ n }}</small></span></label>
+                {% endfor %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Filled in from the dish picked in the popup. No target to choose: it is compared with
+             the best match from any country. -->
+        <input type="hidden" name="origin_country" id="tag-origin">
+        <input type="hidden" name="target_country" value="any">
+
+        <div class="form-footer">
+          <p class="form-note">
+            Pick tags to see every dish that has them, then choose one<br>
+            to find its most similar dish from any country
+          </p>
+          <button type="submit" class="btn btn-red">FIND DISHES</button>
         </div>
       </form>
 
@@ -199,19 +261,7 @@
                  role="status" aria-live="polite" aria-labelledby="img-origin-label">Country of Origin</div>
             <select id="img-origin" name="origin_country" class="origin-select-hidden" tabindex="-1" aria-hidden="true">
               <option value="" disabled selected>Country of Origin</option>
-              <option value="cambodia">Cambodia</option>
-              <option value="china">China</option>
-              <option value="india">India</option>
-              <option value="indonesia">Indonesia</option>
-              <option value="japan">Japan</option>
-              <option value="malaysia">Malaysia</option>
-              <option value="myanmar">Myanmar</option>
-              <option value="philippines">Philippines</option>
-              <option value="saudi arabia">Saudi Arabia</option>
-              <option value="south korea">South Korea</option>
-              <option value="thailand">Thailand</option>
-              <option value="turkiye">Turkey</option>
-              <option value="vietnam">Vietnam</option>
+              {% for c in countries %}<option value="{{ c.value }}">{{ c.label }}</option>{% endfor %}
             </select>
           </div>
 
@@ -219,19 +269,8 @@
             <label for="img-target">TARGET COUNTRY</label>
             <select id="img-target" name="target_country" required>
               <option value="" disabled selected>Select target country...</option>
-              <option value="cambodia">Cambodia</option>
-              <option value="china">China</option>
-              <option value="india">India</option>
-              <option value="indonesia">Indonesia</option>
-              <option value="japan">Japan</option>
-              <option value="malaysia">Malaysia</option>
-              <option value="myanmar">Myanmar</option>
-              <option value="philippines">Philippines</option>
-              <option value="saudi arabia">Saudi Arabia</option>
-              <option value="south korea">South Korea</option>
-              <option value="thailand">Thailand</option>
-              <option value="turkiye">Turkey</option>
-              <option value="vietnam">Vietnam</option>
+              <option value="any">Any country (best match)</option>
+              {% for c in countries %}<option value="{{ c.value }}">{{ c.label }}</option>{% endfor %}
             </select>
           </div>
         </div>
@@ -283,6 +322,17 @@
   </div>
 </div>
 
+  <!-- Popup with every dish that matches the dish name or the ingredients -->
+  <div id="dish-results-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dish-results-title">
+    <div class="modal-box dish-results-box">
+      <button type="button" class="modal-close-btn" id="dish-results-close" aria-label="Close">&times;</button>
+      <h3 id="dish-results-title" class="modal-title">Choose a Dish</h3>
+      <p id="dish-results-desc" class="modal-desc"></p>
+      <div id="dish-results-cuisines" class="popup-cuisines" hidden></div>
+      <div id="dish-results-grid" class="dish-grid popup-dish-grid"></div>
+    </div>
+  </div>
+
   <!-- ==================================
        ERROR MODAL
        ================================== -->
@@ -301,24 +351,13 @@
   
   <script>
     function switchTab(tabType) {
-      const textForm = document.getElementById('text-search-form');
-      const imageForm = document.getElementById('image-search-form');
-      const textBtn = document.getElementById('btn-text-tab');
-      const imageBtn = document.getElementById('btn-image-tab');
-
-      if (textForm && imageForm && textBtn && imageBtn) {
-        if (tabType === 'image') {
-          imageForm.classList.add('active');
-          textForm.classList.remove('active');
-          imageBtn.classList.add('active');
-          textBtn.classList.remove('active');
-        } else {
-          textForm.classList.add('active');
-          imageForm.classList.remove('active');
-          textBtn.classList.add('active');
-          imageBtn.classList.remove('active');
-        }
-      }
+      const tabs = { text: 'text-search-form', tag: 'tag-search-form', image: 'image-search-form' };
+      Object.entries(tabs).forEach(([name, formId]) => {
+        const form = document.getElementById(formId);
+        const btn = document.getElementById('btn-' + name + '-tab');
+        if (form) form.classList.toggle('active', name === tabType);
+        if (btn) btn.classList.toggle('active', name === tabType);
+      });
     }
 
     /* OCR form behavior moved to static/scripts/ocr.js.
@@ -624,269 +663,11 @@
   loadRecipeDatabase();
 </script>
 
-<script>
-  document.addEventListener("DOMContentLoaded", () => {
-    const dishInput = document.getElementById("dish-name-input");
-    const dropdownList = document.getElementById("dish-dropdown-list");
-    const originSelect = document.getElementById("text-origin");
-    if (!dishInput || !dropdownList) return;
-
-    let activeIndex = -1;
-    let currentMatches = [];
-
-    // Save all the origin options so we can bring them back later
-    const allOriginOptions = originSelect
-      ? [...originSelect.options].map((opt) => opt.cloneNode(true))
-      : [];
-
-    function setOriginOptions(allowed) {
-      if (!originSelect) return;
-      const previous = originSelect.value;
-      const options = allOriginOptions.filter(
-        (opt) => opt.value === "" || !allowed || allowed.has(opt.value.trim().toLowerCase())
-      );
-      originSelect.replaceChildren(...options.map((opt) => opt.cloneNode(true)));
-
-      const real = [...originSelect.options].filter((opt) => opt.value !== "");
-      if (allowed && real.length === 1) {
-        originSelect.value = real[0].value;          // only one country
-      } else if (real.some((opt) => opt.value === previous)) {
-        originSelect.value = previous;               // keep the old choice if it's still valid
-      } else {
-        originSelect.value = "";                     // back to "Select..."
-      }
-    }
-
-    // Once a dish is picked, only show its countries
-    function autoFillOriginCountry(dishName) {
-      const picked = pickedRecord();
-      if (picked && dishName && recordNames(picked).includes(dishName.trim().toLowerCase())) {
-        return setOriginOptions(new Set([picked.country.toLowerCase()]));
-      }
-      if (!originSelect || !dishName) return setOriginOptions(null);
-      const matches = recordsForName(dishName);
-      if (matches.length === 0) return setOriginOptions(null);
-      setOriginOptions(new Set(matches.map((r) => r.country.toLowerCase())));
-    }
-
-    const recipeIdInput = document.getElementById("dish-recipe-id");
-
-    function pickedRecord() {
-      const id = recipeIdInput ? recipeIdInput.value : "";
-      if (!id) return null;
-      return DISH_RECORDS.find((r) => String(r.id) === id) || null;
-    }
-
-    function titleCase(text) {
-      return String(text || "").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
-    }
-
-    // Search titles and alternative titles, one row per recipe (so the many Banh Mi
-    // recipes each get their own row). Order: exact match, starts with, contains.
-    function getTopMatches(query, limit = 8) {
-      const q = query.trim().toLowerCase();
-      if (!q) return [];
-
-      const rows = [];
-      for (const record of DISH_RECORDS) {
-        const labels = [
-          { label: record.title, isAlt: false },
-          ...record.alternatives.map((label) => ({ label, isAlt: true }))
-        ];
-        let best = null;
-        for (const { label, isAlt } of labels) {
-          const lower = label.toLowerCase();
-          const rank = lower === q ? 0 : lower.startsWith(q) ? 1 : lower.includes(q) ? 2 : -1;
-          if (rank < 0) continue;
-          // Lower rank wins. On a tie, the real title beats an alternative name.
-          if (!best || rank < best.rank || (rank === best.rank && best.isAlt && !isAlt)) {
-            best = { label, isAlt, rank };
-          }
-        }
-        if (best) rows.push({ ...best, record });
-      }
-      return rows
-        .sort((x, y) => x.rank - y.rank || x.label.localeCompare(y.label) || x.record.title.localeCompare(y.record.title))
-        .slice(0, limit);
-    }
-
-    function renderDropdown(matches) {
-      dropdownList.innerHTML = "";
-      activeIndex = -1;
-      currentMatches = matches;
-      if (matches.length === 0) {
-        dropdownList.classList.add("hidden");
-        return;
-      }
-
-      matches.forEach((match) => {
-        const li = document.createElement("li");
-        li.className = "dropdown-item";
-        li.appendChild(document.createTextNode(match.label.trim()));
-
-        // Note under the name: a title shows its other names, an alternative name
-        // shows which dish it belongs to. No other names = no note.
-        const notes = [];
-        if (match.isAlt) {
-          notes.push("alternative name for " + match.record.title);
-        } else if (match.record.alternatives.length) {
-          notes.push("alternative name: " + match.record.alternatives.join(", "));
-        }
-        if (match.record.country) notes.push(titleCase(match.record.country));
-        if (notes.length) {
-          const hint = document.createElement("span");
-          hint.className = "dropdown-alt";
-          hint.textContent = notes.join(" \u00b7 ");
-          li.appendChild(hint);
-        }
-
-        li.addEventListener("mousedown", (e) => {
-          e.preventDefault();
-          chooseMatch(match);
-        });
-        dropdownList.appendChild(li);
-      });
-      dropdownList.classList.remove("hidden");
-    }
-
-    // Picking a row picks that exact recipe: its recipe_id gets sent and the origin is set
-    function chooseMatch(match) {
-      const clean = match.label.trim();
-      dishInput.value = clean;
-      if (recipeIdInput) recipeIdInput.value = match.record.id ?? "";
-      autoFillOriginCountry(clean);
-      hideDropdown();
-      dishInput.focus();
-    }
-
-    function hideDropdown() {
-      dropdownList.classList.add("hidden");
-      dropdownList.innerHTML = "";
-      activeIndex = -1;
-    }
-
-    function highlightItem(index) {
-      const items = dropdownList.querySelectorAll(".dropdown-item");
-      items.forEach((item, i) => {
-        item.classList.toggle("highlighted", i === index);
-      });
-      if (items[index]) {
-        items[index].scrollIntoView({ block: "nearest" });
-      }
-    }
-
-    dishInput.addEventListener("input", () => {
-      if (recipeIdInput) recipeIdInput.value = "";   // typed by hand, no recipe picked yet
-      renderDropdown(getTopMatches(dishInput.value));
-      autoFillOriginCountry(dishInput.value);
-    });
-
-    dishInput.addEventListener("keydown", (e) => {
-      const items = dropdownList.querySelectorAll(".dropdown-item");
-      if (dropdownList.classList.contains("hidden") || items.length === 0) return;
-
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        activeIndex = (activeIndex + 1) % items.length;
-        highlightItem(activeIndex);
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        activeIndex = (activeIndex - 1 + items.length) % items.length;
-        highlightItem(activeIndex);
-      } else if (e.key === "Enter") {
-        if (activeIndex >= 0 && items[activeIndex]) {
-          e.preventDefault();
-          chooseMatch(currentMatches[activeIndex]);
-        }
-      } else if (e.key === "Escape") {
-        hideDropdown();
-      }
-    });
-
-    dishInput.addEventListener("focus", () => {
-      if (dishInput.value.trim()) {
-        renderDropdown(getTopMatches(dishInput.value));
-      }
-    });
-
-    dishInput.addEventListener("blur", () => {
-      autoFillOriginCountry(dishInput.value);
-    });
-
-    document.addEventListener("click", (e) => {
-      if (e.target !== dishInput && !dropdownList.contains(e.target)) {
-        hideDropdown();
-      }
-    });
-  });
-</script>
+<!-- Text search: dish / ingredients, autocomplete, popup of matching dishes (panel revisions) -->
+<script src="{{ url_for('static', filename='scripts/text-search.js') }}"></script>
+<script src="{{ url_for('static', filename='scripts/tag-search.js') }}"></script>
 
 <script>
-  document.addEventListener("DOMContentLoaded", () => {
-    const textForm = document.getElementById("text-search-form");
-    const dishInput = document.getElementById("dish-name-input");
-
-    if (textForm) {
-      textForm.addEventListener("submit", (e) => {
-        const typedDish = dishInput ? dishInput.value.trim() : "";
-        const originCountry = document.getElementById("text-origin").value.trim();
-        const targetCountry = document.getElementById("text-target").value.trim();
-
-        if (!typedDish || !originCountry || !targetCountry) {
-          e.preventDefault();
-          showErrorModal(
-            "Incomplete Search Fields",
-            "Please select both the Origin Country and Target Country, and enter a dish name."
-          );
-          return;
-        }
-
-        if (typeof DISH_RECORDS === "undefined" || DISH_RECORDS.length === 0) return;
-
-        const dishLower = typedDish.toLowerCase();
-        const originLower = originCountry.toLowerCase();
-        const targetLower = targetCountry.toLowerCase();
-
-        const matchesByTitle = recordsForName(typedDish);
-
-        if (matchesByTitle.length === 0) {
-          e.preventDefault();
-          showErrorModal(
-            "We Can't Find Your Dish",
-            `"${typedDish}" isn't in our recipe database yet. Please check the spelling or try a more general dish name.`
-          );
-          return;
-        }
-
-        const exactMatch = matchesByTitle.find(
-          (r) => r.country.toLowerCase() === originLower
-        );
-
-        if (!exactMatch) {
-          const availableCountries = [...new Set(matchesByTitle.map((r) => r.country))].join(", ");
-          e.preventDefault();
-          showErrorModal(
-            "We Can't Find Your Dish",
-            `We have "${typedDish}", but not listed under that country of origin. Try selecting: ${availableCountries}.`
-          );
-          return;
-        }
-
-        const targetHasDishes = DISH_RECORDS.some(
-          (r) => r.country.toLowerCase() === targetLower
-        );
-
-        if (!targetHasDishes) {
-          e.preventDefault();
-          showErrorModal(
-            "We Can't Find Your Dish",
-            "We don't have any recipes yet for the selected target country, so there's nothing to compare it to. Please choose a different target country."
-          );
-        }
-      });
-    }
-  });
-
   function showErrorModal(title, description) {
     const modalOverlay = document.getElementById("error-modal-overlay");
     const modalTitle = document.getElementById("modal-title-text");
@@ -934,7 +715,8 @@
        data-dish="{{ warn_dish }}"
        data-origin="{{ warn_origin }}"
        data-target="{{ warn_target }}"
-       data-recipe-id="{{ warn_recipe_id }}"></div>
+       data-recipe-id="{{ warn_recipe_id }}"
+       data-ingredients="{{ warn_ingredients }}"></div>
   {% endif %}
 
   <div class="sim-warning-overlay" id="simWarningOverlay" role="alertdialog" aria-modal="true"
@@ -960,6 +742,8 @@
     <input type="hidden" name="origin_country" id="simWarningOrigin">
     <input type="hidden" name="target_country" id="simWarningTarget">
     <input type="hidden" name="recipe_id" id="simWarningRecipeId">
+    <input type="hidden" name="ingredients" id="simWarningIngredients">
+    <input type="hidden" name="search_mode" id="simWarningMode">
     <input type="hidden" name="force" value="1">
   </form>
 
@@ -990,6 +774,7 @@
         const dishInput = document.getElementById("dish-name-input");
         if (dishInput) dishInput.value = data.dataset.dish || "";
         pickOption(document.getElementById("text-origin"), data.dataset.origin);
+        document.getElementById("text-origin").dispatchEvent(new Event("change"));
         pickOption(document.getElementById("text-target"), data.dataset.target);
         const idInput = document.getElementById("dish-recipe-id");
         if (idInput) idInput.value = data.dataset.recipeId || "";
@@ -1012,6 +797,8 @@
         document.getElementById("simWarningOrigin").value = data.dataset.origin || "";
         document.getElementById("simWarningTarget").value = data.dataset.target || "";
         document.getElementById("simWarningRecipeId").value = data.dataset.recipeId || "";
+        document.getElementById("simWarningIngredients").value = data.dataset.ingredients || "";
+        document.getElementById("simWarningMode").value = data.dataset.ingredients ? "ingredients" : "dish";
         document.getElementById("simWarningForm").submit();
       });
 

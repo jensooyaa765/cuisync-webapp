@@ -12,6 +12,7 @@
 
   <link rel="stylesheet" href="{{ url_for('static', filename='css/base-style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/results.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/panel.css') }}">
 
   <style>
     /* Mobile: our code handles touch on the full-screen map (1 finger pans, 2 fingers zoom).
@@ -30,6 +31,7 @@
 <body class="results-page">
 
   <app-nav></app-nav>
+  {% include "partials/flash.html" %}
 
   {# ------------------------------------------------------------------
      Overall similarity as a whole-number percent (0-100). The same value
@@ -73,11 +75,12 @@
           <span class="field-arrow">&rarr;</span>
           <div class="field-item">
             <span class="field-label">TARGET COUNTRY</span>
-            <span class="field-value">{{ target_country | upper }}</span>
+            <span class="field-value">{% if target_any %}ANY &rarr; {{ target_country | upper }}{% else %}{{ target_country | upper }}{% endif %}</span>
           </div>
           <a href="{{ url_for('home') }}" class="btn-search-new">SEARCH NEW CUISINE</a>
         </div>
 
+        {% if ingredient_note %}<p class="ingredient-filter-note">{{ ingredient_note }}</p>{% endif %}
         <p class="recipe-availability-note">
           External recipe links and images are limited and subject to availability.
           Some dishes may not have an active link.
@@ -268,6 +271,62 @@
       </div>
     </section>
 
+
+<!-- ==================================
+     CULTURAL & DIETARY INFORMATION (panel revision: culture, history, health benefits, allergens)
+     ================================== -->
+<section class="section-light cultural-section" id="cultural-info">
+  <div class="inner-content">
+    <h2 class="section-heading dark-text">CULTURAL &amp; DIETARY INFORMATION</h2>
+    <div class="heading-rule"></div>
+    <p class="cultural-intro">The culture and history behind each dish, plus nutrition notes and allergens taken from its ingredient list.</p>
+    <div class="cultural-grid">
+      {% for dish in [source_dish, recommended_dish] if dish %}
+      <article class="cultural-card" data-idx="{{ dish.idx }}">
+        <header>
+          <span class="cultural-eyebrow">{{ 'SEARCHED DISH' if loop.first else 'MOST SIMILAR DISH' }}</span>
+          <h3>{{ dish.title }}</h3>
+          <span class="cultural-country">{{ country_label(dish.country) }}</span>
+        </header>
+        <div class="cultural-body"><p class="cultural-loading">Loading cultural information&hellip;</p></div>
+      </article>
+      {% endfor %}
+    </div>
+    <p class="cultural-disclaimer">Allergens are found from the listed ingredients only. Always check the full recipe and product labels.</p>
+  </div>
+</section>
+
+<script>
+  (() => {
+    const esc = (t) => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    document.querySelectorAll('.cultural-card').forEach(card => {
+      const body = card.querySelector('.cultural-body');
+      fetch('/api/dish-info/' + card.dataset.idx)
+        .then(r => r.json())
+        .then(info => {
+          const allergens = info.allergens.length
+            ? info.allergens.map(a => `<li class="allergen${a.avoid ? ' allergen-avoid' : ''}" title="From: ${esc(a.from.join(', '))}">
+                 <strong>${esc(a.name)}</strong><span>${esc(a.from.join(', '))}</span>${a.avoid ? '<em>On your avoid list</em>' : ''}</li>`).join('')
+            : '<li class="allergen allergen-none">No common allergens found in the listed ingredients.</li>';
+          const health = info.health.length
+            ? info.health.map(h => `<li>${esc(h)}</li>`).join('')
+            : '<li>No nutrition notes for these ingredients yet.</li>';
+          const badge = info.source === 'ai'
+            ? '<span class="badge-mini">AI-GENERATED</span><span class="footer-note">Culture, history and health notes by GPT. Verify before citing.</span>'
+            : '<span class="badge-mini">SUMMARY</span><span class="footer-note">Built from the dataset (GPT unavailable).</span>';
+          const adminNote = info.admin_fields.length ? `<span class="footer-note">${esc(info.admin_fields.join(' and '))} notes added by the CuiSync admin.</span>` : '';
+          body.innerHTML = `
+            <div class="cultural-tags">${info.tags.map(t => `<a class="tag-chip" href="/explore?mode=tags&tag=${encodeURIComponent(t)}">${esc(t)}</a>`).join('')}</div>
+            <h4>Culture</h4><p>${esc(info.culture)}</p>
+            <h4>History</h4><p>${esc(info.history)}</p>
+            <h4>Health &amp; nutrition</h4><ul class="health-list">${health}</ul>
+            <h4>Allergens</h4><ul class="allergen-list">${allergens}</ul>
+            <div class="quote-footer">${badge}${adminNote}</div>`;
+        })
+        .catch(() => { body.innerHTML = '<p>Cultural information is not available right now.</p>'; });
+    });
+  })();
+</script>
 
 <!-- ==================================
      SECTION 3: GEOGRAPHICAL DISTRIBUTION

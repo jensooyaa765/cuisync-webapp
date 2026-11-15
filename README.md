@@ -107,3 +107,13 @@ The application computes the recipe-level similarity first using `softmatch.py`.
 The GPT prompt uses few-shot examples from `cuisync_prompts.py` and includes a grounding check so the generated paragraph is rejected if it introduces unsupported culinary entities. If the API is unavailable or the grounding check fails, the app uses a grounded template explanation instead.
 
 The GPT explanation does not calculate the similarity itself. GPT explains the recommendation produced by CuiSync and uses the Shapley contributions as evidence for which feature type contributed most.
+
+
+### Panel revisions (redefense, Nov 2026)
+
+New files: `accounts.py` (users, profiles, search history), `dataset_store.py` (admin-editable dishes, countries and GPT prompts), `search_tools.py` (keyword, ingredient and tag search, possible cuisines), `cultural_info.py` (culture, history, health notes, allergens), plus the templates `explore.html`, `profile.html`, `auth.html`, `admin.html`, `admin_dish.html` and `static/css/panel.css`. No new packages are needed.
+
+* **Admin page** (`/admin`): first login is `admin` / `cuisync-admin` (or set `CUISYNC_ADMIN_USER` and `CUISYNC_ADMIN_PASSWORD` in `.env` before the first run). Change the password on the Profile page.
+* Admin changes are saved in `admin_data/` (not uploaded to GitHub). The original `recipes.json` and `.npy` files are never overwritten. **Reset to original dataset** on the Dataset tab undoes dataset edits.
+* New dishes reuse the vectors of known ingredients/actions; brand-new items borrow the closest known vector. The Overview tab lists items with no match (run the vectorizer again for those).
+* Set `SECRET_KEY` in `.env` when the app runs on a server, so logins survive restarts.

@@ -14,6 +14,7 @@ class AppNav extends HTMLElement {
           <a href="/home">HOME</a>
           <a href="/analysis">ANALYSIS</a>
           <a href="/faqs">FAQS</a>
+          <a href="/login" class="nav-account" id="nav-account">LOGIN</a>
         </nav>
       </header>
       <div class="nav-overlay" id="nav-overlay"></div>
@@ -21,6 +22,37 @@ class AppNav extends HTMLElement {
 
     // Set up the navbar right after it's added
     this.initNavigation();
+    this.initAccount();
+  }
+
+  // Login / profile / admin links (panel revision: user and admin pages)
+  initAccount() {
+    const path = window.location.pathname;
+    this.querySelectorAll('.nav-links a').forEach(link => {
+      const href = link.getAttribute('href');
+      if (href === path || (href === '/home' && path === '/')) link.classList.add('active');
+    });
+    const account = this.querySelector('#nav-account');
+    fetch('/api/me', { credentials: 'same-origin' })
+      .then(r => r.ok ? r.json() : null)
+      .then(me => {
+        if (!me || !me.logged_in || !account) return;
+        account.textContent = 'PROFILE';
+        account.href = '/profile';
+        if (path.startsWith('/profile')) account.classList.add('active');
+        if (me.is_admin) {
+          const admin = document.createElement('a');
+          admin.href = '/admin';
+          admin.textContent = 'ADMIN';
+          if (path.startsWith('/admin')) admin.classList.add('active');
+          account.before(admin);
+        }
+        const out = document.createElement('a');
+        out.href = '/logout';
+        out.textContent = 'LOGOUT';
+        account.after(out);
+      })
+      .catch(() => {});
   }
 
   initNavigation() {

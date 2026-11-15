@@ -1,0 +1,211 @@
+{% extends "panel_base.html" %}
+{% block title %}Admin{% endblock %}
+{% block eyebrow %}ADMIN PAGE{% endblock %}
+{% block heading %}CuiSync administration{% endblock %}
+{% block lead %}Manage the dishes, countries, dataset, GPT prompts and user accounts.{% endblock %}
+{% block content %}
+<nav class="panel-tabs">
+  {% for t, label in [('overview','OVERVIEW'),('dishes','DISHES'),('countries','COUNTRIES'),('dataset','DATASET'),('prompts','GPT PROMPTS'),('users','USERS')] %}
+  <a href="{{ url_for('admin_page', tab=t) }}" class="{{ 'active' if tab == t }}">{{ label }}</a>
+  {% endfor %}
+</nav>
+
+{% if tab == 'overview' %}
+<section class="stat-row">
+  <div class="stat"><span>{{ total }}</span><small>dishes</small></div>
+  <div class="stat"><span>{{ per_country | length }}</span><small>countries with dishes</small></div>
+  <div class="stat"><span>{{ stats.users }}</span><small>user accounts</small></div>
+  <div class="stat"><span>{{ stats.total_searches }}</span><small>saved searches</small></div>
+</section>
+<section class="panel-card">
+  <h2>Status</h2>
+  <ul class="status-list">
+    <li><strong>Dataset:</strong> {{ 'Edited copy in admin_data/recipes.json' if store.uses_admin_data else 'Original recipes.json (no admin changes yet)' }}</li>
+    <li><strong>GPT:</strong> {{ 'On (explanations and cultural notes use GPT)' if gpt_on else 'Off (template text is used). Set OPENAI_API_KEY in .env to turn it on.' }}</li>
+    <li><strong>Explanation prompt:</strong> {{ 'Custom (edited on this page)' if store.prompts.get('explanation') else 'Default' }}</li>
+    {% if missing %}<li class="warn"><strong>{{ missing | length }} new item(s) have no vector</strong> and don't count in similarity until the vectorizer is run again: {{ missing[:10] | map('last') | join(', ') }}{{ '...' if missing | length > 10 }}</li>{% endif %}
+  </ul>
+</section>
+<section class="panel-card">
+  <h2>Dishes per country</h2>
+  <div class="bar-list">
+    {% set most = per_country.values() | max %}
+    {% for c, n in per_country | dictsort(by='value', reverse=true) %}
+    <div class="bar-row"><span>{{ country_label(c) }}</span><div class="bar"><i style="width: {{ (n * 100 / most) | round }}%"></i></div><em>{{ n }}</em></div>
+    {% endfor %}
+  </div>
+</section>
+{% if stats.top_dishes %}
+<section class="panel-card">
+  <h2>Most searched dishes</h2>
+  <ol class="plain-list">{% for d in stats.top_dishes %}<li>{{ d.dish_name }} <span class="muted">({{ country_label(d.origin_country) }}) &middot; {{ d.n }} searches</span></li>{% endfor %}</ol>
+</section>
+{% endif %}
+
+{% elif tab == 'dishes' %}
+<section class="panel-card">
+  <div class="card-head">
+    <h2>Dishes <span class="muted">({{ total }})</span></h2>
+    <a class="btn-panel btn-panel-red" href="{{ url_for('admin_dish_form') }}">+ ADD DISH</a>
+  </div>
+  <form method="GET" class="filter-row">
+    <input type="hidden" name="tab" value="dishes">
+    <input type="search" name="q" value="{{ q }}" placeholder="Search title or ingredient">
+    <select name="country">
+      <option value="">All countries</option>
+      {% for c in store.countries %}<option value="{{ c.name }}" {{ 'selected' if c.name == country }}>{{ c.label }}</option>{% endfor %}
+    </select>
+    <button class="btn-panel" type="submit">FILTER</button>
+  </form>
+  <div class="table-wrap">
+    <table class="panel-table">
+      <thead><tr><th>ID</th><th>Dish</th><th>Country</th><th>Ingredients</th><th></th></tr></thead>
+      <tbody>
+      {% for i, r in rows %}
+        <tr>
+          <td class="muted">{{ r.recipe_id }}</td>
+          <td><strong>{{ r.title }}</strong>{% if r.alternative_title %}<br><i class="muted">{{ r.alternative_title }}</i>{% endif %}</td>
+          <td>{{ country_label(r.country) }}</td>
+          <td class="clip">{{ r.ingredient_text }}</td>
+          <td class="row-actions">
+            <a class="btn-panel btn-panel-small" href="{{ url_for('admin_dish_form', recipe_id=r.recipe_id) }}">EDIT</a>
+            <form method="POST" action="{{ url_for('admin_dish_delete', recipe_id=r.recipe_id) }}" onsubmit="return confirm('Delete {{ r.title | e }}? This removes it from search results.')">
+              <button class="icon-btn" type="submit" title="Delete" aria-label="Delete">&times;</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="muted">No dishes match.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if pages > 1 %}
+  <div class="pager">
+    {% if page > 1 %}<a href="{{ url_for('admin_page', tab='dishes', q=q, country=country, page=page-1) }}">&larr; Prev</a>{% endif %}
+    <span>Page {{ page }} of {{ pages }}</span>
+    {% if page < pages %}<a href="{{ url_for('admin_page', tab='dishes', q=q, country=country, page=page+1) }}">Next &rarr;</a>{% endif %}
+  </div>
+  {% endif %}
+</section>
+
+{% elif tab == 'countries' %}
+<section class="panel-card">
+  <h2>Countries in the dropdowns</h2>
+  <p class="muted">A country shows in the search dropdowns when "Show" is ticked and it has at least one dish. Changing the name only changes how it is shown; its dishes stay linked to it.</p>
+  {% for c in store.countries %}<form method="POST" action="{{ url_for('admin_country_update', name=c.name) }}" id="cf-{{ loop.index }}"></form>{% endfor %}
+  <div class="table-wrap">
+    <table class="panel-table">
+      <thead><tr><th>Country</th><th>Region</th><th>Show</th><th>Dishes</th><th></th></tr></thead>
+      <tbody>
+      {% for c in store.countries %}
+        <tr>
+          <td><input form="cf-{{ loop.index }}" type="text" name="label" value="{{ c.label }}" aria-label="Country name"></td>
+          <td><select form="cf-{{ loop.index }}" name="region" aria-label="Region">{% for r in regions %}<option {{ 'selected' if r == c.region }}>{{ r }}</option>{% endfor %}</select></td>
+          <td><input form="cf-{{ loop.index }}" type="checkbox" name="visible" {{ 'checked' if c.visible }} aria-label="Show in dropdown"></td>
+          <td>{{ counts.get(c.name, 0) }}</td>
+          <td class="row-actions">
+            <button form="cf-{{ loop.index }}" class="btn-panel btn-panel-small" type="submit">SAVE</button>
+            <form method="POST" action="{{ url_for('admin_country_delete', name=c.name) }}" onsubmit="return confirm('Remove {{ c.label | e }}?')">
+              <button class="icon-btn" type="submit" title="Remove" aria-label="Remove" {{ 'disabled' if counts.get(c.name, 0) }}>&times;</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="panel-card">
+  <h2>Add a country</h2>
+  <form method="POST" action="{{ url_for('admin_country_add') }}" class="filter-row">
+    <input type="text" name="label" placeholder="Country name, e.g. Laos" required>
+    <select name="region">{% for r in regions %}<option>{{ r }}</option>{% endfor %}</select>
+    <button class="btn-panel btn-panel-red" type="submit">ADD COUNTRY</button>
+  </form>
+  <p class="muted small">Then add its dishes on the Dishes tab or upload them on the Dataset tab.</p>
+</section>
+
+{% elif tab == 'dataset' %}
+<section class="panel-card">
+  <h2>Upload dishes</h2>
+  <p class="muted">Upload a <strong>.json</strong> list of dishes or a <strong>.csv</strong> with these columns:
+    <code>title, alternative_title, country, region, recipe_link, image_link, ingredient_text, action_text, cookware_text, utensil_text, tags</code>.
+    Lists inside a cell are comma-separated (the same format as recipes.json).</p>
+  <form method="POST" action="{{ url_for('admin_dataset_upload') }}" enctype="multipart/form-data" class="panel-form">
+    <input type="file" name="dataset" accept=".json,.csv" required>
+    <div class="radio-row">
+      <label class="check"><input type="radio" name="mode" value="append" checked> Add to the current dataset</label>
+      <label class="check"><input type="radio" name="mode" value="replace"> Replace the whole dataset</label>
+    </div>
+    <button class="btn-panel btn-panel-red" type="submit" onclick="return this.form.mode.value !== 'replace' || confirm('Replace ALL dishes with the uploaded file?')">UPLOAD</button>
+  </form>
+</section>
+<section class="panel-card">
+  <h2>Download &amp; reset</h2>
+  <p><a class="btn-panel" href="{{ url_for('admin_dataset_download', format='json') }}">DOWNLOAD JSON</a>
+     <a class="btn-panel" href="{{ url_for('admin_dataset_download', format='csv') }}">DOWNLOAD CSV</a></p>
+  <form method="POST" action="{{ url_for('admin_dataset_reset') }}" onsubmit="return confirm('Go back to the original recipes.json? Your edited copy is kept as a .bak file.')">
+    <button class="btn-panel btn-panel-ghost" type="submit" {{ 'disabled' if not store.uses_admin_data }}>RESET TO ORIGINAL DATASET</button>
+  </form>
+  <p class="muted small">How similarity works for new dishes: items already in the vocabulary reuse their vectors; new ones borrow the vector of the closest known item. Run the vectorizer again for a full update.</p>
+</section>
+
+{% elif tab == 'prompts' %}
+{% if not gpt_on %}<div class="flash flash-info">GPT is off right now (no OPENAI_API_KEY), so these prompts are saved but only used once GPT is on.</div>{% endif %}
+<section class="panel-card">
+  <div class="card-head"><h2>Similarity explanation prompt</h2><span class="type-pill">{{ 'CUSTOM' if explanation_custom else 'DEFAULT' }}</span></div>
+  <p class="muted">The system prompt GPT gets when it explains why two dishes are similar. The few-shot examples and the grounding check stay the same.</p>
+  <form method="POST" action="{{ url_for('admin_prompts') }}" class="panel-form">
+    <input type="hidden" name="which" value="explanation">
+    <textarea name="prompt" rows="18" class="mono">{{ explanation_prompt }}</textarea>
+    <div><button class="btn-panel btn-panel-red" type="submit" name="action" value="save">SAVE PROMPT</button>
+      <button class="btn-panel btn-panel-ghost" type="submit" name="action" value="reset" onclick="return confirm('Go back to the default prompt?')">RESET TO DEFAULT</button></div>
+  </form>
+</section>
+<section class="panel-card">
+  <div class="card-head"><h2>Cultural information prompt</h2><span class="type-pill">{{ 'CUSTOM' if cultural_custom else 'DEFAULT' }}</span></div>
+  <p class="muted">Used for the culture, history and health notes on the results page. It must ask for JSON with the keys culture, history and health.</p>
+  <form method="POST" action="{{ url_for('admin_prompts') }}" class="panel-form">
+    <input type="hidden" name="which" value="cultural">
+    <textarea name="prompt" rows="12" class="mono">{{ cultural_prompt }}</textarea>
+    <div><button class="btn-panel btn-panel-red" type="submit" name="action" value="save">SAVE PROMPT</button>
+      <button class="btn-panel btn-panel-ghost" type="submit" name="action" value="reset" onclick="return confirm('Go back to the default prompt?')">RESET TO DEFAULT</button></div>
+  </form>
+</section>
+
+{% elif tab == 'users' %}
+<section class="panel-card">
+  <h2>User accounts</h2>
+  <div class="table-wrap">
+    <table class="panel-table">
+      <thead><tr><th>User</th><th>Profile</th><th>Searches</th><th>Role</th><th></th></tr></thead>
+      <tbody>
+      {% for u in users %}
+        <tr>
+          <td><strong>{{ u.name }}</strong><br><span class="muted">@{{ u.username }}</span></td>
+          <td>{{ u.cooking_role or '-' }}{% if u.home_country %}<br><span class="muted">{{ u.home_country }}</span>{% endif %}</td>
+          <td>{{ u.searches }}</td>
+          <td>
+            <form method="POST" action="{{ url_for('admin_user_role', user_id=u.id) }}" class="inline">
+              <select name="role" onchange="this.form.submit()" {{ 'disabled' if u.id == me.id }} aria-label="Role">
+                <option value="user" {{ 'selected' if u.role == 'user' }}>User</option>
+                <option value="admin" {{ 'selected' if u.role == 'admin' }}>Admin</option>
+              </select>
+            </form>
+          </td>
+          <td class="row-actions">
+            {% if u.id != me.id %}
+            <form method="POST" action="{{ url_for('admin_user_delete', user_id=u.id) }}" onsubmit="return confirm('Delete @{{ u.username | e }} and their search history?')">
+              <button class="icon-btn" type="submit" title="Delete" aria-label="Delete">&times;</button>
+            </form>
+            {% else %}<span class="muted small">you</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

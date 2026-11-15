@@ -1,0 +1,63 @@
+{% extends "panel_base.html" %}
+{% block title %}{{ 'Edit dish' if recipe_id else 'Add dish' }}{% endblock %}
+{% block eyebrow %}ADMIN &middot; DISHES{% endblock %}
+{% block heading %}{{ dish.title if recipe_id else 'Add a dish' }}{% endblock %}
+{% block lead %}{{ 'Recipe ID ' ~ recipe_id if recipe_id else 'New dishes can be searched and compared as soon as you save.' }}{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('admin_page', tab='dishes') }}">&larr; Back to dishes</a></p>
+<section class="panel-card">
+  <form method="POST" class="panel-form two-col">
+    <label>Dish name (title) *
+      <input type="text" name="title" value="{{ dish.title or '' }}" required>
+    </label>
+    <label>Alternative / native name
+      <input type="text" name="alternative_title" value="{{ dish.alternative_title or '' }}">
+    </label>
+    <label>Country *
+      <select name="country" required>
+        <option value="">Choose a country</option>
+        {% for c in all_countries %}<option value="{{ c.name }}" {{ 'selected' if (dish.country or '') | upper == c.name }}>{{ c.label }}</option>{% endfor %}
+      </select>
+      <span class="muted small">Not listed? Add it on the Countries tab first.</span>
+    </label>
+    <label>Region within the country
+      <input type="text" name="region" value="{{ dish.region or '' }}" placeholder="e.g. Kyushu, Visayas (optional)">
+    </label>
+    <label>Recipe link
+      <input type="url" name="recipe_link" value="{{ dish.recipe_link or '' }}" placeholder="https://">
+    </label>
+    <label>Image link
+      <input type="url" name="image_link" value="{{ dish.image_link or '' }}" placeholder="https://">
+    </label>
+
+    <h3 class="span-2 form-section">Entities used for similarity <span class="muted">(comma-separated)</span></h3>
+    <label class="span-2">Ingredients *
+      <textarea name="ingredient_text" rows="3" required placeholder="chicken thigh, garlic, soy sauce, vinegar">{{ dish.ingredient_text or '' }}</textarea>
+    </label>
+    <label class="span-2">Cooking actions
+      <textarea name="action_text" rows="2" placeholder="marinate, simmer, fry">{{ dish.action_text or '' }}</textarea>
+    </label>
+    <label>Cookware
+      <input type="text" name="cookware_text" value="{{ dish.cookware_text or '' }}" placeholder="pot, wok">
+    </label>
+    <label>Utensils
+      <input type="text" name="utensil_text" value="{{ dish.utensil_text or '' }}" placeholder="knife, bowl">
+    </label>
+
+    <h3 class="span-2 form-section">Extra information</h3>
+    <label class="span-2">Tags <span class="muted">(added to the automatic tags, comma-separated)</span>
+      <input type="text" name="tags" value="{{ dish.tags or '' }}" placeholder="street food, festive, breakfast">
+    </label>
+    <label class="span-2">Culture notes <span class="muted">(shown instead of the GPT text when filled in)</span>
+      <textarea name="culture_notes" rows="2">{{ dish.culture_notes or '' }}</textarea>
+    </label>
+    <label class="span-2">History notes <span class="muted">(shown instead of the GPT text when filled in)</span>
+      <textarea name="history_notes" rows="2">{{ dish.history_notes or '' }}</textarea>
+    </label>
+    <div class="span-2">
+      <button class="btn-panel btn-panel-red" type="submit">{{ 'SAVE CHANGES' if recipe_id else 'ADD DISH' }}</button>
+      <a class="btn-panel btn-panel-ghost" href="{{ url_for('admin_page', tab='dishes') }}">CANCEL</a>
+    </div>
+  </form>
+</section>
+{% endblock %}
