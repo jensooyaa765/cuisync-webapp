@@ -2409,3 +2409,38 @@ a.entity-chip:focus-visible { outline: 2px solid var(--gold-accent); outline-off
     padding-right: max(20px, env(safe-area-inset-right, 0px)) !important;
   }
 }
+
+/* Rank of the picked dish on the results list (right card), same look as the list's rank badges */
+.dish-comparison-section .rank-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  border-radius: 50%;
+  background: var(--maroon-dark);
+  border: 2px solid var(--gold-accent);
+  color: #ffffff;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+}
+.dish-comparison-section .rank-badge small {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 0.48rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--gold-light);
+}
+.dish-comparison-section .rank-badge--top { width: 54px; height: 54px; font-size: 1.3rem; border-width: 2.5px; }
+.dish-rank-note {
+  margin: 0 0 4px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.dish-rank-note strong { color: var(--maroon-main); }

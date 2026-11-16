@@ -88,7 +88,7 @@
               data-country="{{ d.country }}"
               data-tags="{{ d.tags | tojson | forceescape }}">
             <a class="ov-card" href="{{ d.url }}">
-              <span class="ov-rank" aria-label="Rank {{ d.rank }}">{{ d.rank }}</span>
+              <span class="ov-rank {{ 'ov-rank--top' if d.rank <= 3 }}" aria-label="Rank {{ d.rank }}">{{ d.rank }}</span>
               <span class="ov-card-img">
                 <img src="{{ d.image_link or no_image }}" alt="" loading="lazy" referrerpolicy="no-referrer"
                      onerror="this.onerror=null;this.src='{{ no_image }}'">
@@ -178,19 +178,19 @@
           </div>
         </section>
 
-        <!-- Most common tags in the list (region, main protein, cooking method, dish type...) -->
+        <!-- Most common tags in the list: region, ingredient, cooking method, dish type -->
         {% if common_tags %}
         <section class="ov-side-block ov-divider" aria-labelledby="ov-common-heading">
           <h2 class="ov-side-heading" id="ov-common-heading">MOST COMMON TAGS IN RESULTS</h2>
-          <p class="ov-side-sub">Shared across the top {{ results | length }} similar dishes. Click a tag to see every dish with it in the Dish Dictionary.</p>
+          <p class="ov-side-sub">Shared across the top {{ results | length }} similar dishes. Click a tag to see every dish with it on the Dishes page.</p>
           <div class="ov-common">
             {% for group, tags in common_tags %}
             <div class="ov-common-group">
               <span class="ov-common-name">{{ group }}</span>
               <div class="ov-common-chips">
                 {% for t in tags %}
-                <a class="ov-common-chip" href="{{ url_for('dictionary', tag=t.name) }}"
-                   title="In {{ t.count }} of {{ results | length }} listed dishes. Click to see every dish tagged {{ t.name }}.">{{ t.name }} <small>{{ t.count }}</small></a>
+                <a class="ov-common-chip" href="{{ t.url }}"
+                   title="In {{ t.count }} of {{ results | length }} listed dishes. Click to see every dish with {{ t.name }}.">{{ t.name }} <small>{{ t.count }}</small></a>
                 {% endfor %}
               </div>
             </div>
@@ -227,27 +227,40 @@
 
   <app-footer></app-footer>
 
-  <!-- Full-screen map -->
+  <!-- Full-screen interactive map: a pin for every dish on the list (plus your dish),
+       a country filter bar, and a side panel for the picked pin -->
   <div class="ov-modal" id="ov-modal" hidden>
-    <div class="ov-modal-box" role="dialog" aria-modal="true" aria-labelledby="ov-modal-title">
+    <div class="ov-modal-box ovm" role="dialog" aria-modal="true" aria-labelledby="ov-modal-title">
       <div class="ov-modal-head">
         <div>
           <h2 id="ov-modal-title">GEOGRAPHICAL DISTRIBUTION</h2>
-          <p>Where the {{ results | length }} similar dishes come from. {% if target_any %}Click a country to filter the list.{% endif %}</p>
+          <p>Where the {{ results | length }} similar dishes come from. Click a pin to see the dish.</p>
         </div>
         <button type="button" class="ov-modal-close" id="ov-modal-close" aria-label="Close map">&times;</button>
       </div>
-      <div class="ov-modal-body">
-        <div class="ov-map-box ov-map-box--large" id="ov-map-box-large">
-          <svg class="ov-map-svg" id="ov-map-svg-large" role="img" aria-label="Larger map of Asia"></svg>
-          <div class="ov-map-tooltip" id="ov-map-tooltip-large" hidden></div>
+
+      <!-- Country filter (countries only) -->
+      <div class="ovm-filters" id="ovm-filters" role="group" aria-label="Show countries"></div>
+
+      <div class="ovm-body">
+        <div class="ovm-map" id="ovm-map">
+          <svg class="ov-map-svg" id="ovm-svg" role="img" aria-label="Map of Asia with a pin for each dish"><g id="ovm-g"></g></svg>
+          <div class="ovm-pins" id="ovm-pins"></div>
+          <div class="ov-map-tooltip" id="ovm-tooltip" hidden></div>
+          <div class="ovm-zoom" role="group" aria-label="Zoom">
+            <button type="button" id="ovm-zoom-in" aria-label="Zoom in">+</button>
+            <button type="button" id="ovm-zoom-out" aria-label="Zoom out">&minus;</button>
+            <button type="button" id="ovm-zoom-reset" class="ovm-zoom-reset" aria-label="Reset zoom">RESET</button>
+          </div>
+          <div class="ov-map-legend ovm-legend">
+            <span><i class="sw sw-origin"></i>Origin ({{ source.country_label }})</span>
+            <span><i class="sw sw-low"></i>Fewer results</span>
+            <span><i class="sw sw-high"></i>More results</span>
+          </div>
         </div>
-        <ul class="ov-modal-list" id="ov-modal-list"></ul>
-      </div>
-      <div class="ov-map-legend">
-        <span><i class="sw sw-origin"></i>Origin ({{ source.country_label }})</span>
-        <span><i class="sw sw-low"></i>Fewer similar dishes</span>
-        <span><i class="sw sw-high"></i>More similar dishes</span>
+
+        <!-- Side panel: filled in by overview.js -->
+        <aside class="ovm-panel" id="ovm-panel" aria-live="polite"></aside>
       </div>
     </div>
   </div>

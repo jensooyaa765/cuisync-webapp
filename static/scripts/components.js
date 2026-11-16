@@ -18,8 +18,8 @@ class AppNav extends HTMLElement {
 
         <nav class="nav-links" id="nav-menu">
           <a href="/home">HOME</a>
-          <a href="/analysis">ANALYSIS</a>
-          <a href="/dictionary">DICTIONARY</a>
+          <a href="/analysis">STATISTICS</a>
+          <a href="/dictionary">DISHES</a>
           <a href="/faqs">FAQS</a>
           <a href="/login" class="nav-account" id="nav-account">LOGIN</a>
         </nav>
@@ -34,11 +34,11 @@ class AppNav extends HTMLElement {
         </a>
         <a href="/analysis" class="bottom-nav-item" data-match="/analysis">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg>
-          <span>Analysis</span>
+          <span>Statistics</span>
         </a>
         <a href="/dictionary" class="bottom-nav-item" data-match="/dictionary">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg>
-          <span>Dictionary</span>
+          <span>Dishes</span>
         </a>
         <a href="/faqs" class="bottom-nav-item" data-match="/faqs">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M9.2 9.2a2.9 2.9 0 0 1 5.6 1c0 1.9-2.8 2.6-2.8 4.3"/><path d="M12 17.6h.01"/></svg>
@@ -152,8 +152,8 @@ class AppFooter extends HTMLElement {
             <h4 class="footer-heading">EXPLORE</h4>
             <ul class="footer-links">
               <li><a href="/home">Home</a></li>
-              <li><a href="/analysis">Analysis</a></li>
-              <li><a href="/dictionary">Dish Dictionary</a></li>
+              <li><a href="/analysis">Statistics</a></li>
+              <li><a href="/dictionary">Dishes</a></li>
               <li><a href="/faqs">FAQS</a></li>
             </ul>
           </div>

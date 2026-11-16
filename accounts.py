@@ -66,6 +66,16 @@ def init(data_dir):
                 created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             CREATE INDEX IF NOT EXISTS idx_history_user ON search_history(user_id, created_at DESC);
+            -- Recent searches: every dish-vs-dish comparison a user opened (home page row and
+            -- the "All recent searches" page). data is a small JSON entry (see app.py).
+            CREATE TABLE IF NOT EXISTS recent_comparisons (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                pair_key      TEXT NOT NULL,
+                data          TEXT NOT NULL,
+                created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_recent_user ON recent_comparisons(user_id, id DESC);
             """
         )
 
@@ -271,3 +281,36 @@ def recent_searches(limit=8):
             "ORDER BY h.created_at DESC, h.id DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------------- recent searches (opened comparisons) ----------------
+RECENT_MAX = 100   # kept per user
+
+
+def add_recent(user_id, pair_key, entry):
+    """Save an opened comparison. The same pair moves back to the top instead of repeating."""
+    with closing(_conn()) as conn, conn:
+        conn.execute("DELETE FROM recent_comparisons WHERE user_id = ? AND pair_key = ?", (user_id, pair_key))
+        conn.execute("INSERT INTO recent_comparisons (user_id, pair_key, data) VALUES (?, ?, ?)",
+                     (user_id, pair_key, json.dumps(entry)))
+        conn.execute("""DELETE FROM recent_comparisons WHERE user_id = ? AND id NOT IN (
+                          SELECT id FROM recent_comparisons WHERE user_id = ? ORDER BY id DESC LIMIT ?)""",
+                     (user_id, user_id, RECENT_MAX))
+
+
+def list_recent(user_id):
+    with closing(_conn()) as conn:
+        rows = conn.execute("SELECT data FROM recent_comparisons WHERE user_id = ? ORDER BY id DESC",
+                            (user_id,)).fetchall()
+    out = []
+    for row in rows:
+        try:
+            out.append(json.loads(row["data"]))
+        except ValueError:
+            continue
+    return out
+
+
+def clear_recent(user_id):
+    with closing(_conn()) as conn, conn:
+        conn.execute("DELETE FROM recent_comparisons WHERE user_id = ?", (user_id,))
