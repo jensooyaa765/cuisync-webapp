@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import threading
+import time
 import unicodedata
 from functools import lru_cache, wraps
 
@@ -258,6 +259,8 @@ def inject_globals():
         "country_label": STORE.label_of,
         # Tag groups for the "Search by tag" tab (only built when the template asks)
         "home_tag_groups": lambda: search_tools.all_tags(RECIPES, STORE.region_of)[0],
+        # Recent searches row on the home page (newest 8)
+        "recent_searches": lambda: recent_entries(limit=8),
         # Quick picks for the Ingredient sub-tab of "Search by tag"
         "home_ingredient_quick": quick_ingredients,
         # Countries for the Region tab of "Search by tag": [(value, label, number of dishes)]
@@ -587,6 +590,8 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
         target_country = RECIPES[best_index]["country"]
 
     similarity_score = round(float(total_scores[best_index]) * 100, 2)
+    # Recent searches: every comparison that is opened
+    record_recent(source_idx, best_index, similarity_score, link_params)
 
     # Shapley values for the GPT explanation. Empty categories are skipped so they still add up to the score.
     shapley, influence, clean_sims = shapley_for(per_feature, best_index)
@@ -600,6 +605,10 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
     recommended_dish["recipe_link"] = format_recipe_url(
         recommended_dish.get("recipe_link", "")
     )
+
+    # Where the picked dish is on the results list (shown on the comparison page)
+    dish_rank = ordered_targets.index(best_index) + 1
+    rank_scope = "all other countries" if target_any else STORE.label_of(target_country.upper())
 
     for idx in [i for i in ordered_targets if i != best_index][:3]:
         dish = RECIPES[idx].copy()
@@ -709,6 +718,9 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
         shap_values=shapley,
         influence=influence or {},
         overview_url=url_for("similar_dishes", **link_params),
+        dish_rank=dish_rank,
+        rank_total=len(ordered_targets),
+        rank_scope=rank_scope,
         # Clickable tags on the two dish cards (they open the Dish Dictionary)
         source_tags=search_tools.recipe_tags(RECIPES[source_idx], STORE.region_of),
         target_tags=search_tools.recipe_tags(RECIPES[best_index], STORE.region_of),
@@ -720,6 +732,101 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
             STORE.label_of, STORE.region_of, parse_items, dish_title=source_dish["title"].strip(),
         ),
     )
+
+
+# ---------------- Recent searches (home page row + "All recent searches" page) ----------------
+# Every dish-vs-dish comparison someone opens is kept: logged-in users in the accounts
+# database, guests in their browser session (cookie). Entries older than 30 days are not shown.
+RECENT_DAYS = 30
+GUEST_RECENT_MAX = 20     # the session cookie is small, so guests keep fewer
+
+
+def record_recent(source_idx, target_idx, score, link_params):
+    entry = {
+        "s": int(source_idx), "st": (RECIPES[source_idx].get("title") or "").strip(),
+        "t": int(target_idx), "tt": (RECIPES[target_idx].get("title") or "").strip(),
+        "sc": int(round(score)),
+        "tg": link_params.get("target_country", ANY_COUNTRY),
+        "ty": link_params.get("type", "text"),
+        "ing": link_params.get("ingredients", ""),
+        "ts": int(time.time()),
+    }
+    key = f"{entry['st']}|{entry['tt']}|{entry['tg']}|{entry['ing']}".lower()
+    user = current_user()
+    try:
+        if user:
+            accounts.add_recent(user["id"], key, entry)
+        else:
+            entry["k"] = key
+            items = [e for e in session.get("recent", []) if e.get("k") != key]
+            session["recent"] = [entry] + items[:GUEST_RECENT_MAX - 1]
+    except Exception as error:   # recent searches must never break a comparison
+        app.logger.warning("Could not save recent search: %s", error)
+
+
+def _find_recipe(idx, title):
+    """The recipe a saved entry points to (the admin can add/remove dishes, so check the title)."""
+    if 0 <= idx < len(RECIPES) and normalize_name(RECIPES[idx].get("title", "")) == normalize_name(title):
+        return idx
+    key = normalize_name(title)
+    return next((i for i, r in enumerate(RECIPES) if normalize_name(r.get("title", "")) == key), None)
+
+
+def recent_entries(limit=None):
+    """Cards for the recent searches, newest first."""
+    user = current_user()
+    raw = accounts.list_recent(user["id"]) if user else session.get("recent", [])
+    cutoff = time.time() - RECENT_DAYS * 86400
+    cards = []
+    for e in raw:
+        if e.get("ts", 0) < cutoff:
+            continue
+        s_idx, t_idx = _find_recipe(e.get("s", -1), e.get("st", "")), _find_recipe(e.get("t", -1), e.get("tt", ""))
+        if s_idx is None or t_idx is None:
+            continue
+        src, tgt = RECIPES[s_idx], RECIPES[t_idx]
+        params = {
+            "dish_name": (src.get("title") or "").strip(),
+            "origin_country": src["country"].lower(),
+            "target_country": e.get("tg", ANY_COUNTRY),
+            "recipe_id": src.get("recipe_id") or "",
+            "type": e.get("ty", "text"),
+            "pick": t_idx,
+        }
+        if e.get("ing"):
+            params["ingredients"] = e["ing"]
+        cards.append({
+            "source": {"title": params["dish_name"], "country": src["country"].lower(),
+                       "country_label": STORE.label_of(src["country"]), "image": src.get("image_link") or ""},
+            "target": {"title": (tgt.get("title") or "").strip(), "country": tgt["country"].lower(),
+                       "country_label": STORE.label_of(tgt["country"]), "image": tgt.get("image_link") or ""},
+            "score": e.get("sc", 0),
+            "ts": e.get("ts", 0),
+            "url": url_for("compare", **params),
+        })
+        if limit and len(cards) >= limit:
+            break
+    return cards
+
+
+@app.route("/recent")
+def recent_searches():
+    """All recent searches (the "See all" link of the home page row)."""
+    cards = recent_entries()
+    origins = sorted({(c["source"]["country"], c["source"]["country_label"]) for c in cards},
+                     key=lambda c: c[1])
+    return render_template("recent.html", cards=cards, origins=origins, keep_days=RECENT_DAYS)
+
+
+@app.route("/recent/clear", methods=["POST"])
+def clear_recent_searches():
+    user = current_user()
+    if user:
+        accounts.clear_recent(user["id"])
+    else:
+        session.pop("recent", None)
+    flash("Your recent searches were cleared.", "success")
+    return redirect(url_for("recent_searches"))
 
 
 # ---------------- Overview page (list of similar dishes before the comparison) ----------------
@@ -740,6 +847,12 @@ def tag_group(tag):
 
 
 TAG_GROUP_ORDER = ("Region", "Main protein", "Cooking method", "Dish type", "Diet & flavor", "Custom")
+# Groups shown in "Most common tags in results" (same as the home page tag search sub-tabs)
+COMMON_TAG_GROUPS = ("Region", "Ingredient", "Cooking method", "Dish type")
+# Too basic to say anything about a group of dishes
+COMMON_INGREDIENT_SKIP = {"Salt", "Water", "Oil", "Vegetable Oil", "Cooking Oil", "Olive Oil", "Pepper",
+                          "Black Pepper", "Sugar", "White Sugar", "Ice", "Hot Water", "Cold Water",
+                          "Neutral Oil", "Cornstarch"}
 
 
 def render_overview(source_dish, source_idx, ordered_targets, total_scores, target_country,
@@ -757,11 +870,21 @@ def render_overview(source_dish, source_idx, ordered_targets, total_scores, targ
     country_counts = Counter(r["country"] for r in results)
     tag_counts = Counter(t for r in results for t in r["tags"])
 
-    # Most common tags in the list, grouped (region, main protein, cooking method, dish type...)
+    # Most common tags in the list: Region, Ingredient, Cooking method, Dish type
+    # (each links to the Dish Dictionary, filtered to it)
     grouped = {}
     for tag, n in tag_counts.most_common():
-        grouped.setdefault(tag_group(tag), []).append({"name": tag, "count": n})
-    common_tags = [(g, grouped[g][:6]) for g in TAG_GROUP_ORDER if g in grouped]
+        group = tag_group(tag)
+        if group in COMMON_TAG_GROUPS:
+            grouped.setdefault(group, []).append(
+                {"name": tag, "count": n, "url": url_for("dictionary", tag=tag)})
+    ingredient_counts = Counter(
+        i for idx in shown for i in set(parse_items(RECIPES[idx].get("ingredient_text", "")))
+        if i not in COMMON_INGREDIENT_SKIP)
+    grouped["Ingredient"] = [
+        {"name": name, "count": n, "url": url_for("dictionary", ingredient=name.lower())}
+        for name, n in ingredient_counts.most_common(6)]
+    common_tags = [(g, grouped[g][:6]) for g in COMMON_TAG_GROUPS if grouped.get(g)]
 
     # Countries with the most similar dishes (best match per country), not the origin
     # and not the country already shown
@@ -797,6 +920,7 @@ def render_overview(source_dish, source_idx, ordered_targets, total_scores, targ
         entry["count"] += 1
 
     source_card = dish_card(source_idx)
+    source_ings = set(parse_items(RECIPES[source_idx].get("ingredient_text", "")))
     source_card["recipe_link"] = source_dish.get("recipe_link", "")
     source_card["region"] = source_dish.get("country_region") or STORE.region_of(source_dish["country"])
 
@@ -825,11 +949,37 @@ def render_overview(source_dish, source_idx, ordered_targets, total_scores, targ
             "origin": source_dish["country"],
             "target": None if target_any else target_country.upper(),
             "countries": list(map_countries.values()),
+            # Full-screen map: a pin per dish, and what its side panel shows
+            "source": {
+                "idx": source_idx, "title": source_card["title"],
+                "alt": source_card["alternative_title"], "country": source_dish["country"],
+                "label": source_card["country_label"], "image": source_card["image_link"],
+                "tags": source_card["tags"],
+                "ingredients": sorted(source_ings),
+            },
+            "dishes": [map_dish(r, source_ings) for r in results],
         },
         connection=connection,
         ingredient_note=ingredient_note,
         search_url=url_for("home") + "#search-section",
     )
+
+
+def map_dish(card, source_ings):
+    """One pin on the results map: the dish, its rank/score and its ingredients compared
+    with the searched dish (shared / only in the searched dish / only in this dish)."""
+    ings = set(parse_items(RECIPES[card["idx"]].get("ingredient_text", "")))
+    return {
+        "idx": card["idx"], "rank": card["rank"], "score": card["score"],
+        "title": card["title"], "alt": card["alternative_title"],
+        "country": card["country"], "label": card["country_label"],
+        "image": card["image_link"], "tags": card["tags"], "url": card["url"],
+        "ingredients": {
+            "shared": sorted(ings & source_ings),
+            "source_unique": sorted(source_ings - ings),
+            "target_unique": sorted(ings - source_ings),
+        },
+    }
 
 
 def _search_args():

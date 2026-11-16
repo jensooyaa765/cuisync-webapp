@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/similarity-warning.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/panel.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/recent.css') }}">
 </head>
 <body>
 
@@ -34,6 +35,25 @@
       <a href="#search-section" class="btn btn-gold">SEARCH NOW</a>
     </div>
   </section>
+
+  <!-- ==================================
+       RECENT SEARCHES (comparisons opened by this user / this browser; hidden when empty)
+       ================================== -->
+  {% from "partials/recent_card.html" import recent_card with context %}
+  {% set recent = recent_searches() %}
+  {% if recent %}
+  <section class="recent-section" aria-labelledby="recent-heading">
+    <div class="recent-inner">
+      <div class="recent-head">
+        <h2 class="recent-heading" id="recent-heading">&#9670; RECENT SEARCHES</h2>
+        <a class="recent-see-all" href="{{ url_for('recent_searches') }}">See all <span aria-hidden="true">&rarr;</span></a>
+      </div>
+      <div class="recent-row">
+        {% for c in recent %}{{ recent_card(c) }}{% endfor %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
 
   <!-- ==================================
        MAIN SEARCH SECTION
