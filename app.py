@@ -1966,6 +1966,31 @@ def forbidden(_error):
                            forbidden="Only admins can open that page."), 403
 
 
+
+# ---------------- PWA: installable app (manifest, service worker, offline page) ----------------
+from flask import send_from_directory as _send_from_directory
+
+PWA_DIR = os.path.join(app.root_path, "static", "pwa")
+
+
+@app.route("/manifest.webmanifest")
+def pwa_manifest():
+    return _send_from_directory(PWA_DIR, "manifest.webmanifest", mimetype="application/manifest+json")
+
+
+@app.route("/sw.js")
+def pwa_service_worker():
+    # Served from the site root so it can work for every page. Never cached, so updates arrive.
+    response = _send_from_directory(PWA_DIR, "sw.js", mimetype="application/javascript")
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@app.route("/offline")
+def pwa_offline():
+    return render_template("offline.html")
+
+
 if __name__ == "__main__":
     # Load the OCR models in the background so the first upload is faster.
     # Only load them in the real app process (the reloader starts the app twice).
