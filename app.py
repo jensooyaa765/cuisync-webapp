@@ -1453,8 +1453,11 @@ def admin_tag_rename():
 @app.route("/admin/tags/delete", methods=["POST"])
 @admin_required
 def admin_tag_delete():
-    n = STORE.delete_tag(request.form.get("name"))
-    flash(f'Tag removed from {n} dish(es).', "success")
+    try:
+        n = STORE.delete_tag(request.form.get("name"))
+        flash(f'Tag removed from {n} dish(es).', "success")
+    except ValueError as error:
+        flash(str(error), "error")
     return redirect(url_for("admin_page", tab="tags"))
 
 
@@ -1611,9 +1614,15 @@ def admin_dataset_download():
 @app.route("/admin/dataset/reset", methods=["POST"])
 @admin_required
 def admin_dataset_reset():
-    STORE.reset_to_original()
+    try:
+        STORE.reset_to_original()
+    except ValueError as error:
+        flash(str(error), "error")
+        return redirect(url_for("admin_page", tab="dataset"))
     reload_data()
-    flash("The dataset is back to the original recipes.json (your edited copy was kept as a .bak file).", "success")
+    flash("The dataset is back to the original recipes.json." if STORE.db else
+          "The dataset is back to the original recipes.json (your edited copy was kept as a .bak file).",
+          "success")
     return redirect(url_for("admin_page", tab="dataset"))
 
 
@@ -1628,7 +1637,11 @@ def admin_prompts():
         text = ""
     if which == "cultural" and text.strip() == cultural_info.DEFAULT_PROMPT.strip():
         text = ""
-    STORE.set_prompt(which, text)
+    try:
+        STORE.set_prompt(which, text)
+    except ValueError as error:
+        flash(str(error), "error")
+        return redirect(url_for("admin_page", tab="prompts"))
     if which == "explanation":
         cuisync_prompts.set_system_prompt(text)
     flash("Prompt reset to the default." if not text else "Prompt saved. New searches use it right away.", "success")

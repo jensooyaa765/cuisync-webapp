@@ -29,7 +29,7 @@
   <div class="kpi">
     <div class="kpi-top"><p class="kpi-label">Total dishes</p><span class="kpi-icon">{{ icon('dish') }}</span></div>
     <p class="kpi-value">{{ "{:,}".format(total) }}</p>
-    <p class="kpi-note">{{ 'Edited dataset (admin_data)' if store.uses_admin_data else 'Original recipes.json' }}</p>
+    <p class="kpi-note">{{ ('Edited dataset' ~ (' (Supabase)' if store.db else ' (admin_data)')) if store.uses_admin_data else 'Original recipes.json' }}</p>
   </div>
   <div class="kpi">
     <div class="kpi-top"><p class="kpi-label">Countries</p><span class="kpi-icon">{{ icon('globe') }}</span></div>
@@ -543,13 +543,13 @@
 
   <section class="card grow-1">
     <div class="card-head"><h2>Download &amp; reset</h2><span class="kpi-icon">{{ icon('download') }}</span></div>
-    <p class="hint card-hint">Now using: <strong>{{ 'the edited copy in admin_data/recipes.json' if store.uses_admin_data else 'the original recipes.json' }}</strong>.</p>
+    <p class="hint card-hint">Now using: <strong>{{ ('the edited dataset in Supabase' if store.db else 'the edited copy in admin_data/recipes.json') if store.uses_admin_data else 'the original recipes.json' }}</strong>.{% if store.db %} Saved in Supabase, so edits stay after a restart.{% endif %}</p>
     <div class="stack-sm">
       <a class="btn btn-outline btn-block" href="{{ url_for('admin_dataset_download', format='json') }}">{{ icon('download', 18) }} Download JSON</a>
       <a class="btn btn-outline btn-block" href="{{ url_for('admin_dataset_download', format='csv') }}">{{ icon('download', 18) }} Download CSV</a>
       <form method="post" action="{{ url_for('admin_dataset_reset') }}">
         <button type="submit" class="btn btn-outline btn-block btn-danger" {{ 'disabled' if not store.uses_admin_data }}
-                data-confirm="Go back to the original recipes.json? Your edited copy is kept as a .bak file.">{{ icon('reset', 18) }} Reset to original dataset</button>
+                data-confirm="{{ 'Go back to the original recipes.json? This replaces the dishes in Supabase. Download a copy first if you want to keep your edits.' if store.db else 'Go back to the original recipes.json? Your edited copy is kept as a .bak file.' }}">{{ icon('reset', 18) }} Reset to original dataset</button>
       </form>
     </div>
     <p class="hint mt">New dishes reuse the vectors of known items. Brand-new items borrow the closest known vector; run the vectorizer again for a full update.</p>
