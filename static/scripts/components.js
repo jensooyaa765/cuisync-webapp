@@ -4,23 +4,48 @@ class AppNav extends HTMLElement {
       <header class="navbar" id="navbar">
         <a href="/home"><div class="logo">CUISYNC</div></a>
         
-        <button class="hamburger-toggle" id="hamburger-btn" aria-label="Toggle Navigation Menu">
-          <span class="bar"></span>
-          <span class="bar"></span>
-          <span class="bar"></span>
+        <button class="hamburger-toggle" id="hamburger-btn" aria-label="Toggle Navigation Menu" aria-controls="nav-menu" aria-expanded="false">
+          <span class="hamburger-line"></span>
+          <span class="hamburger-line"></span>
+          <span class="hamburger-line"></span>
         </button>
 
         <nav class="nav-links" id="nav-menu">
           <a href="/home">HOME</a>
           <a href="/analysis">ANALYSIS</a>
           <a href="/faqs">FAQS</a>
+          <a href="/login" class="nav-account" id="nav-account">LOGIN</a>
         </nav>
       </header>
       <div class="nav-overlay" id="nav-overlay"></div>
     `;
 
-    // Initialize navbar scripts immediately after rendering
+    // Set up the navbar right after it's added
     this.initNavigation();
+    this.initAccount();
+  }
+
+  // Login / profile links (panel revision: user pages). The admin is a separate app (admin_app.py).
+  initAccount() {
+    const path = window.location.pathname;
+    this.querySelectorAll('.nav-links a').forEach(link => {
+      const href = link.getAttribute('href');
+      if (href === path || (href === '/home' && path === '/')) link.classList.add('active');
+    });
+    const account = this.querySelector('#nav-account');
+    fetch('/api/me', { credentials: 'same-origin' })
+      .then(r => r.ok ? r.json() : null)
+      .then(me => {
+        if (!me || !me.logged_in || !account) return;
+        account.textContent = 'PROFILE';
+        account.href = '/profile';
+        if (path.startsWith('/profile')) account.classList.add('active');
+        const out = document.createElement('a');
+        out.href = '/logout';
+        out.textContent = 'LOGOUT';
+        account.after(out);
+      })
+      .catch(() => {});
   }
 
   initNavigation() {
@@ -29,35 +54,39 @@ class AppNav extends HTMLElement {
     const navMenu = this.querySelector('#nav-menu');
     const navOverlay = this.querySelector('#nav-overlay');
 
-    // Sticky Scroll Effect
-    window.addEventListener('scroll', () => {
-      if (navbar) {
-        if (window.scrollY > 40) {
-          navbar.classList.add('scrolled');
-        } else {
-          navbar.classList.remove('scrolled');
-        }
-      }
-    });
+    // Sticky navbar on scroll (also runs on load in case the page starts scrolled)
+    const onScroll = () => {
+      navbar && navbar.classList.toggle('scrolled', window.scrollY > 40);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
 
-    // Mobile Menu Drawer Toggle
+    // Mobile menu open/close
     if (hamburgerBtn && navMenu && navOverlay) {
-      const toggleMenu = () => {
-        hamburgerBtn.classList.toggle('open');
-        navMenu.classList.toggle('active');
-        navOverlay.classList.toggle('active');
-        document.body.style.overflow = navMenu.classList.contains('active') ? 'hidden' : 'auto';
+      const setMenu = (open) => {
+        hamburgerBtn.classList.toggle('open', open);
+        navMenu.classList.toggle('active', open);
+        navOverlay.classList.toggle('active', open);
+        hamburgerBtn.setAttribute('aria-expanded', String(open));
+        // Class on <html> so it also works on iOS Safari
+        document.documentElement.classList.toggle('menu-open', open);
       };
+      const toggleMenu = () => setMenu(!navMenu.classList.contains('active'));
 
       hamburgerBtn.addEventListener('click', toggleMenu);
-      navOverlay.addEventListener('click', toggleMenu);
+      navOverlay.addEventListener('click', () => setMenu(false));
 
       this.querySelectorAll('.nav-links a').forEach(link => {
-        link.addEventListener('click', () => {
-          if (navMenu.classList.contains('active')) {
-            toggleMenu();
-          }
-        });
+        link.addEventListener('click', () => setMenu(false));
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') setMenu(false);
+      });
+
+      // Close the menu if the screen gets wider than mobile
+      window.matchMedia('(min-width: 821px)').addEventListener('change', (e) => {
+        if (e.matches) setMenu(false);
       });
     }
   }
@@ -82,36 +111,21 @@ class AppFooter extends HTMLElement {
           <div class="footer-col">
             <h4 class="footer-heading">EXPLORE</h4>
             <ul class="footer-links">
-              <li><a href="/index">Home</a></li>
+              <li><a href="/home">Home</a></li>
               <li><a href="/analysis">Analysis</a></li>
               <li><a href="/faqs">FAQS</a></li>
             </ul>
           </div>
 
           <div class="footer-col">
-            <h4 class="footer-heading">ASIAN CUISINES</h4>
-            <div class="cuisine-grid">
-              <ul>
-                <li><a href="analysis.html?country=cambodia">Cambodia</a></li>
-                <li><a href="analysis.html?country=china">China</a></li>
-                <li><a href="analysis.html?country=india">India</a></li>
-                <li><a href="analysis.html?country=indonesia">Indonesia</a></li>
-                <li><a href="analysis.html?country=japan">Japan</a></li>
-              </ul>
-              <ul>
-                <li><a href="analysis.html?country=malaysia">Malaysia</a></li>
-                <li><a href="analysis.html?country=myanmar">Myanmar</a></li>
-                <li><a href="analysis.html?country=philippines">Philippines</a></li>
-                <li><a href="analysis.html?country=saudi-arabia">Saudi Arabia</a></li>
-                <li><a href="analysis.html?country=south-korea">South Korea</a></li>
-              </ul>
-              <ul>
-                <li><a href="analysis.html?country=turkey">Turkey</a></li>
-                <li><a href="analysis.html?country=thailand">Thailand</a></li>
-                <li><a href="analysis.html?country=vietnam">Vietnam</a></li>
-              </ul>
-            </div>
+            <h4 class="footer-heading">DATASET COVERAGE</h4>
+            <p class="footer-dataset-desc">
+              Our research dataset analyzes recipes across Asian cuisines, incorporating culinary data from 
+              Cambodia, China, India, Indonesia, Japan, Malaysia, Myanmar, Philippines, Saudi Arabia, 
+              South Korea, Thailand, Turkey, and Vietnam.
+            </p>
           </div>
+
         </div>
 
         <div class="footer-bottom">
@@ -124,17 +138,3 @@ class AppFooter extends HTMLElement {
 
 customElements.define('app-nav', AppNav);
 customElements.define('app-footer', AppFooter);
-
-  //===========================================================================
-  // STICKY NAVBAR
-  //===========================================================================
-  window.addEventListener('scroll', function() {
-    const navbar = document.querySelector('.navbar');
-    if (navbar) {
-      if (window.scrollY > 50) {
-        navbar.classList.add('scrolled');
-      } else {
-        navbar.classList.remove('scrolled');
-      }
-    }
-  });
