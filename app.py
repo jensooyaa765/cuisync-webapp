@@ -1,4 +1,5 @@
 import csv
+from collections import Counter
 import difflib
 import io
 import json
@@ -257,7 +258,37 @@ def inject_globals():
         "country_label": STORE.label_of,
         # Tag groups for the "Search by tag" tab (only built when the template asks)
         "home_tag_groups": lambda: search_tools.all_tags(RECIPES, STORE.region_of)[0],
+        # Quick picks for the Ingredient sub-tab of "Search by tag"
+        "home_ingredient_quick": quick_ingredients,
+        # Countries for the Region tab of "Search by tag": [(value, label, number of dishes)]
+        "home_country_options": home_country_options,
     }
+
+
+def home_country_options():
+    counts = Counter(r["country"].lower() for r in RECIPES)
+    return [(c["value"], c["label"], counts[c["value"]]) for c in STORE.dropdown_countries()]
+
+
+# Main ingredients offered as quick picks (only the ones in the dataset, with dish counts)
+QUICK_INGREDIENTS = ("chicken", "pork", "beef", "shrimp", "fish", "egg", "tofu", "rice",
+                     "noodle", "coconut milk", "tomato", "soy sauce")
+
+
+@lru_cache(maxsize=4)
+def _quick_ingredient_counts(data_version):
+    out = []
+    for name in QUICK_INGREDIENTS:
+        # Same matching as the search: the ingredient and its cuts/forms ("chicken thigh")
+        items = set(INGREDIENT_SEARCH.resolve(name)) | set(INGREDIENT_SEARCH.family(name))
+        n = sum(1 for ids in INGREDIENT_SEARCH.recipe_ids if items & set(ids.tolist()))
+        if n:
+            out.append((name, n))
+    return out
+
+
+def quick_ingredients():
+    return _quick_ingredient_counts(id(INGREDIENT_SEARCH))
 
 
 def save_history(**entry):
@@ -382,7 +413,15 @@ def ingredient_filter(ingredients, target_country, exclude_idx):
 
 
 def get_search_results(dish_name, origin_country, target_country, force=False, recipe_id=None,
-                       search_type="text", ingredients=""):
+                       search_type="text", ingredients="", pick=None, show_overview=False):
+    """One search, three outcomes:
+      - pick given          -> the detailed comparison page (results.html) for that dish
+      - show_overview=True  -> the list of similar dishes (overview.html)
+      - neither (a search form was sent) -> check the search, save it to the history and
+        redirect to the overview page, so the browser's back button works without
+        "Confirm form resubmission".
+    """
+    requested_target = (target_country or "").strip()
     # "Any" target country (panel revision): look in every country except the dish's own.
     # No target at all (the tag search has none) also means "Any".
     if not (target_country or "").strip():
@@ -487,15 +526,20 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
     ordered_targets = sorted(
         target_indices, key=lambda index: total_scores[index], reverse=True
     )
-    best_index = ordered_targets[0]
-    if target_any:
-        # From here on the target is the country of the best match
-        target_country = RECIPES[best_index]["country"]
 
-
+    # The dish picked on the overview page (falls back to the best match if it isn't allowed)
+    picked = None
+    if pick not in (None, ""):
+        try:
+            picked = int(pick)
+        except (TypeError, ValueError):
+            picked = None
+        if picked is not None and picked not in set(target_indices):
+            picked = None
+    best_index = picked if picked is not None else ordered_targets[0]
 
     # Score too low: go back and ask the user first instead of loading the results
-    if total_scores[best_index] < SIMILARITY_THRESHOLD and not force:
+    if total_scores[best_index] < SIMILARITY_THRESHOLD and not force and picked is None:
         return low_similarity_page(
             f'No dish from {"any other country" if target_any else target_country.title()} in our dataset is similar enough to '
             f'"{source_dish["title"]}" to recommend (closest match is only '
@@ -507,6 +551,40 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
             source_dish.get("recipe_id"),
             ingredients,
         )
+
+    # Links between the overview page and the comparison page carry the same search
+    link_params = {
+        "dish_name": source_dish["title"].strip(),
+        "origin_country": source_dish["country"].lower(),
+        "target_country": ANY_COUNTRY if target_any else requested_target.lower(),
+        "recipe_id": source_dish.get("recipe_id") or "",
+        "type": search_type,
+    }
+    if ingredients:
+        link_params["ingredients"] = ingredients
+
+    if picked is None and not show_overview and pick in (None, ""):
+        best = RECIPES[best_index]
+        save_history(
+            search_type=search_type,
+            dish_name=source_dish["title"].strip(),
+            origin_country=source_dish["country"],
+            target_country=ANY_COUNTRY if target_any else target_country,
+            recipe_id=source_dish.get("recipe_id"),
+            result_title=best["title"].strip(),
+            result_country=best["country"],
+            score=round(float(total_scores[best_index]) * 100, 2),
+            query=json.dumps({"ingredients": ingredients}) if ingredients else "",
+        )
+        return redirect(url_for("similar_dishes", **link_params))
+
+    if picked is None:
+        return render_overview(source_dish, source_idx, ordered_targets, total_scores,
+                               target_country, target_any, ingredient_note, link_params)
+
+    if target_any:
+        # From here on the target is the country of the picked dish
+        target_country = RECIPES[best_index]["country"]
 
     similarity_score = round(float(total_scores[best_index]) * 100, 2)
 
@@ -523,7 +601,7 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
         recommended_dish.get("recipe_link", "")
     )
 
-    for idx in ordered_targets[1:4]:
+    for idx in [i for i in ordered_targets if i != best_index][:3]:
         dish = RECIPES[idx].copy()
         dish["idx"] = int(idx)
         dish["score"] = round(float(total_scores[idx]) * 100, 2)
@@ -609,17 +687,7 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
         key: round(value * 100) for key, value in WEIGHTS.items()
     }
 
-    save_history(
-        search_type=search_type,
-        dish_name=source_dish["title"].strip(),
-        origin_country=source_dish["country"],
-        target_country=ANY_COUNTRY if target_any else target_country,
-        recipe_id=source_dish.get("recipe_id"),
-        result_title=recommended_dish["title"].strip(),
-        result_country=recommended_dish["country"],
-        score=similarity_score,
-        query=json.dumps({"ingredients": ingredients}) if ingredients else "",
-    )
+    # (The search was already saved to the history when it was made, see above.)
 
     user = current_user()
     return render_template(
@@ -640,7 +708,143 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
         feature_scores=feature_scores,
         shap_values=shapley,
         influence=influence or {},
+        overview_url=url_for("similar_dishes", **link_params),
     )
+
+
+# ---------------- Overview page (list of similar dishes before the comparison) ----------------
+OVERVIEW_LIMIT = 60          # dishes sent to the list (shown 12 at a time)
+# Tag groups for "Most common tags in results" (same groups as the home page tag picker)
+def tag_group(tag):
+    if tag.endswith("Asia"):
+        return "Region"
+    if tag in search_tools.METHOD_TAGS:
+        return "Cooking method"
+    if tag in search_tools.PROTEIN_TAGS:
+        return "Main protein"
+    if tag in search_tools.TYPE_TAGS:
+        return "Dish type"
+    if tag in ("Spicy", "Vegetarian"):
+        return "Diet & flavor"
+    return "Custom"
+
+
+TAG_GROUP_ORDER = ("Region", "Main protein", "Cooking method", "Dish type", "Diet & flavor", "Custom")
+
+
+def render_overview(source_dish, source_idx, ordered_targets, total_scores, target_country,
+                    target_any, ingredient_note, link_params):
+    shown = ordered_targets[:OVERVIEW_LIMIT]
+
+    results = []
+    for rank, idx in enumerate(shown, 1):
+        card = dish_card(idx, float(total_scores[idx]))
+        card["rank"] = rank
+        card["url"] = url_for("compare", pick=idx, **link_params)
+        results.append(card)
+
+    # Filter chips above the list: countries in the list and their most common tags
+    country_counts = Counter(r["country"] for r in results)
+    tag_counts = Counter(t for r in results for t in r["tags"])
+
+    # Most common tags in the list, grouped (region, main protein, cooking method, dish type...)
+    grouped = {}
+    for tag, n in tag_counts.most_common():
+        grouped.setdefault(tag_group(tag), []).append({"name": tag, "count": n})
+    common_tags = [(g, grouped[g][:6]) for g in TAG_GROUP_ORDER if g in grouped]
+
+    # Countries with the most similar dishes (best match per country), not the origin
+    # and not the country already shown
+    skip = {source_dish["country"].lower()} | (set() if target_any else {target_country.lower()})
+    best_per_country = {}
+    for idx in np.argsort(total_scores)[::-1]:
+        recipe = RECIPES[int(idx)]
+        key = recipe["country"].lower()
+        if int(idx) == source_idx or key in skip or key in best_per_country:
+            continue
+        best_per_country[key] = int(idx)
+        if len(best_per_country) == 3:
+            break
+    similar_countries = []
+    for key, idx in best_per_country.items():
+        params = dict(link_params, target_country=key)
+        params.pop("ingredients", None)   # the ingredient filter belongs to the first country
+        similar_countries.append({
+            "country": RECIPES[idx]["country"],
+            "label": STORE.label_of(RECIPES[idx]["country"]),
+            "dish": (RECIPES[idx].get("title") or "").strip(),
+            "image_link": RECIPES[idx].get("image_link") or "",
+            "score": round(float(total_scores[idx]) * 100),
+            "url": url_for("similar_dishes", **params),
+        })
+
+    # Map: how many listed dishes each country has, and its best one
+    map_countries = {}
+    for r in results:
+        entry = map_countries.setdefault(r["country"], {
+            "country": r["country"], "label": r["country_label"], "count": 0,
+            "best": r["title"], "score": r["score"]})
+        entry["count"] += 1
+
+    source_card = dish_card(source_idx)
+    source_card["recipe_link"] = source_dish.get("recipe_link", "")
+    source_card["region"] = source_dish.get("country_region") or STORE.region_of(source_dish["country"])
+
+    connection = cultural_info.country_connection(
+        RECIPES,
+        source_dish["country"],
+        None if target_any else target_country.upper(),
+        STORE.label_of,
+        STORE.region_of,
+        parse_items,
+        dish_title=source_card["title"],
+    )
+
+    return render_template(
+        "overview.html",
+        source=source_card,
+        results=results,
+        total=len(ordered_targets),
+        target_any=target_any,
+        target_label="Any country" if target_any else STORE.label_of(target_country.upper()),
+        country_filters=country_counts.most_common(),
+        tag_filters=[t for t, _ in tag_counts.most_common(8)],
+        common_tags=common_tags,
+        similar_countries=similar_countries,
+        map_data={
+            "origin": source_dish["country"],
+            "target": None if target_any else target_country.upper(),
+            "countries": list(map_countries.values()),
+        },
+        connection=connection,
+        ingredient_note=ingredient_note,
+        search_url=url_for("home") + "#search-section",
+    )
+
+
+def _search_args():
+    """The search fields of the overview/compare links."""
+    a = request.args
+    return dict(
+        dish_name=a.get("dish_name", "").strip(),
+        origin_country=a.get("origin_country", "").strip(),
+        target_country=a.get("target_country", "").strip(),
+        recipe_id=a.get("recipe_id", "").strip() or None,
+        search_type=a.get("type", "text") if a.get("type") in ("text", "image") else "text",
+        ingredients=a.get("ingredients", ""),
+    )
+
+
+@app.route("/similar-dishes")
+def similar_dishes():
+    """Overview: the list of similar dishes for a search (opened after every search)."""
+    return get_search_results(force=True, show_overview=True, **_search_args())
+
+
+@app.route("/compare")
+def compare():
+    """Detailed comparison with the dish picked on the overview page."""
+    return get_search_results(force=True, pick=request.args.get("pick"), **_search_args())
 
 
 @app.route("/api/explain-pin")
@@ -693,7 +897,8 @@ def search_text():
         request.form.get("target_country", "").strip(),
         force=request.form.get("force") == "1",
         recipe_id=request.form.get("recipe_id", "").strip() or None,
-        ingredients=request.form.get("ingredients", "") if request.form.get("search_mode") == "ingredients" else "",
+        # Ingredients come from the Ingredient sub-tab of "Search by tag" (or an older ingredient search)
+        ingredients=request.form.get("ingredients", "") if request.form.get("search_mode") in ("ingredients", "tags") else "",
     )
 
 
@@ -1130,7 +1335,9 @@ def open_history(entry_id):
                                   search_type=entry["search_type"], ingredients=saved.get("ingredients", ""))
     params = json.loads(entry["query"] or "{}")
     if params.get("mode") == "tags":
-        return redirect(url_for("home", mode="tags", tag=params.get("tag", [])) + "#search-section")
+        return redirect(url_for("home", mode="tags", tag=params.get("tag", []),
+                                country=params.get("country", []),
+                                **({"ing": params["ing"]} if params.get("ing") else {})) + "#search-section")
     if params.get("mode") in ("ingredients", "keyword"):
         return redirect(url_for("home", mode="ingredients" if params["mode"] == "ingredients" else "dish",
                                 q=params.get("q", "")) + "#search-section")
@@ -1169,7 +1376,8 @@ def api_find_dishes():
     """
     mode = request.args.get("mode", "dish")
     q = request.args.get("q", "").strip()
-    if not q:
+    if not q and not (mode == "tags" and (request.args.get("ing", "").strip()
+                                          or request.args.get("country", "").strip())):
         return jsonify({"dishes": [], "total": 0})
     if mode == "ingredients":
         wanted = [w for w in split_names(q) if w]
@@ -1194,15 +1402,40 @@ def api_find_dishes():
             "dishes": [dish_card(idx, score, found) for idx, score, found in results],
         })
     if mode == "tags":
+        # "Search by tag": tags (region, cooking method, dish type) and ingredients together.
+        # Dishes must have all the tags; with ingredients they are ranked by how many they use.
         tags = [t for t in q.split("|") if t]
-        results = search_tools.tag_search(RECIPES, tags, "", STORE.region_of)
-        save_history(search_type="tags", query=json.dumps({"mode": "tags", "tag": tags}),
-                     result_title=f"{len(results)} dishes")
+        wanted = [w for w in split_names(request.args.get("ing", "")) if w]
+        # Countries of origin from the Region tab (a dish is from one country, so any of them)
+        countries = {c.strip().lower() for c in request.args.get("country", "").split("|") if c.strip()}
+        unknown, cuisines = [], []
+        if wanted:
+            results, unknown = INGREDIENT_SEARCH.search(RECIPES, wanted, "", limit=len(RECIPES))
+            if tags:
+                results = [r for r in results
+                           if all(t in search_tools.recipe_tags(RECIPES[r[0]], STORE.region_of) for t in tags)]
+            cuisines = search_tools.possible_cuisines(RECIPES, results, STORE.label_of)
+        else:
+            results = search_tools.tag_search(RECIPES, tags, "", STORE.region_of)
+        if countries:
+            results = [r for r in results if RECIPES[r[0]]["country"].lower() in countries]
+            if wanted:
+                cuisines = search_tools.possible_cuisines(RECIPES, results, STORE.label_of)
+        saved = {"mode": "tags", "tag": tags}
+        if wanted:
+            saved["ing"] = ", ".join(wanted)
+        if countries:
+            saved["country"] = sorted(countries)
+        save_history(search_type="tags", query=json.dumps(saved), result_title=f"{len(results)} dishes")
         return jsonify({
             "mode": "tags",
             "tags": tags,
+            "ingredients": wanted,
+            "countries": [STORE.label_of(c.upper()) for c in sorted(countries)],
+            "unknown": unknown,
+            "cuisines": cuisines,
             "total": len(results),
-            "dishes": [dish_card(idx) for idx, _, _ in results[:60]],
+            "dishes": [dish_card(idx, score if wanted else None, found) for idx, score, found in results[:60]],
         })
     results = search_tools.keyword_search(RECIPES, q, "", recipe_names)
     return jsonify({
@@ -1274,6 +1507,37 @@ def explore():
         unknown=unknown, cuisines=cuisines, searched=searched,
         close_spelling=close_spelling, more_url=url_for("explore", **more_args),
         avoid_allergens=(current_user() or {}).get("avoid_allergens", []),
+    )
+
+
+# ---------------- Dish Dictionary (every dish in the dataset, search + filters) ----------------
+@app.route("/dictionary")
+def dictionary():
+    """All dishes in the dataset. Clickable tags anywhere in the system link here
+    with ?tag=<tag> (and countries with ?country=<name>). Filtering, sorting and paging
+    happen in the browser (static/scripts/dictionary.js)."""
+    visible = {c["value"] for c in STORE.dropdown_countries()}
+    counts = Counter(r["country"].lower() for r in RECIPES if r["country"].lower() in visible)
+    dishes = []
+    for idx, r in enumerate(RECIPES):
+        country = r["country"].lower()
+        if country not in visible:
+            continue
+        dishes.append({
+            "id": idx,
+            "t": (r.get("title") or "").strip(),
+            "a": (r.get("alternative_title") or "").strip(),
+            "c": country,
+            "l": STORE.label_of(r["country"]),
+            "g": search_tools.recipe_tags(r, STORE.region_of),
+            "i": r.get("image_link") or "",
+        })
+    tag_groups, _ = search_tools.all_tags([RECIPES[d["id"]] for d in dishes], STORE.region_of)
+    return render_template(
+        "dictionary.html",
+        dishes=dishes,
+        countries=[{**c, "count": counts[c["value"]]} for c in STORE.dropdown_countries()],
+        tag_groups=tag_groups,
     )
 
 

@@ -207,3 +207,94 @@ def dish_info(recipe, region_label, country_label):
         "source": source,
         "admin_fields": admin_fields,
     }
+
+
+# ---------------- Country connection (overview page) ----------------
+# TEMPLATE VERSION. The overview page shows a "Historical & Cultural Connection" note
+# between the origin country and the target country (or only the origin country when the
+# target is "Any"). It will be written by GPT with the prompt below; until that is wired
+# up, country_connection() builds a neutral note from the dataset instead, and the page
+# labels it as a template preview.
+CONNECTION_PROMPT = """You write short notes for CuiSync, a system that compares Asian dishes.
+You get one JSON object with an origin country and, optionally, a target country, plus the
+ingredients and cooking methods that are common in each country's dishes in the dataset.
+If there is a target country, write 2 short paragraphs on the historical and cultural
+connection between the two cuisines (trade, migration, shared influences, colonial history)
+and how it shows in their food. If there is no target country, write 2 short paragraphs on
+the culinary history and heritage of the origin country only.
+Rules: be neutral and respectful, do not rank cuisines, say plainly when history is uncertain,
+keep each paragraph under 90 words, return ONLY a JSON object {"paragraphs": ["...", "..."]}."""
+
+_METHODS = {"Simmer", "Boil", "Fry", "Stir-Fry", "Deep-Fry", "Pan-Fry", "Steam", "Grill", "Roast",
+            "Bake", "Braise", "Stew", "Marinate", "Ferment", "Blanch", "Poach", "Saute", "Toast",
+            "Smoke", "Pickle", "Broil", "Sear"}
+_TOO_COMMON = {"Salt", "Water", "Oil", "Vegetable Oil", "Cooking Oil", "Pepper", "Black Pepper",
+               "Sugar", "Ice", "Hot Water", "Cold Water", "Neutral Oil"}
+
+
+def _join(words):
+    words = [w.lower() for w in words]
+    if len(words) <= 1:
+        return "".join(words)
+    return ", ".join(words[:-1]) + " and " + words[-1]
+
+
+def _country_profile(recipes, country, parse_items):
+    from collections import Counter
+    dishes = [r for r in recipes if (r.get("country") or "").upper() == country]
+    ings, acts = Counter(), Counter()
+    for r in dishes:
+        ings.update(i for i in set(parse_items(r.get("ingredient_text", ""))) if i not in _TOO_COMMON)
+        acts.update(a for a in set(parse_items(r.get("action_text", ""))) if a in _METHODS)
+    return {
+        "count": len(dishes),
+        "ingredients": [n for n, _ in ings.most_common(12)],
+        "methods": [n for n, _ in acts.most_common(5)],
+    }
+
+
+def country_connection(recipes, origin, target, label_of, region_of, parse_items, dish_title=""):
+    """Note for the overview page. target=None means "Any" (origin country only).
+    Returns {"title", "subtitle", "paragraphs", "source", "prompt"}."""
+    origin = (origin or "").upper()
+    a_label, a_region = label_of(origin), region_of(origin)
+    a = _country_profile(recipes, origin, parse_items)
+
+    if not target or target.upper() == origin:
+        paragraphs = [
+            f"{dish_title or 'This dish'} comes from {a_label}, part of {a_region}. "
+            f"{a_label} is represented by {a['count']} dishes in the CuiSync dataset.",
+            (f"Across those dishes, {a_label} cooking most often builds on "
+             f"{_join(a['ingredients'][:5])}, and its recipes commonly "
+             f"{_join(a['methods'][:3]) or 'combine'} their ingredients. "
+             f"This section will describe the history and heritage of {a_label}'s cuisine "
+             f"once it is generated from the AI prompt."),
+        ]
+        return {"title": a_label, "subtitle": "Culinary Origin & Heritage",
+                "paragraphs": paragraphs, "source": "template", "prompt": CONNECTION_PROMPT}
+
+    target = target.upper()
+    b_label, b_region = label_of(target), region_of(target)
+    b = _country_profile(recipes, target, parse_items)
+    same_region = a_region == b_region
+    shared = [i for i in a["ingredients"] if i in set(b["ingredients"])]
+    shared_methods = [m for m in a["methods"] if m in set(b["methods"])]
+    only_a = [i for i in a["ingredients"] if i not in set(b["ingredients"])][:3]
+    only_b = [i for i in b["ingredients"] if i not in set(a["ingredients"])][:3]
+
+    p1 = (f"{a_label} and {b_label} "
+          + (f"are both part of {a_region}" if same_region
+             else f"come from different parts of Asia ({a_region} and {b_region})")
+          + f". The CuiSync dataset has {a['count']} dishes from {a_label} "
+            f"and {b['count']} from {b_label}.")
+    p2 = ""
+    if shared:
+        p2 += f"Both cuisines often use {_join(shared[:4])}"
+        p2 += (f", and both commonly {_join(shared_methods[:3])} their dishes. " if shared_methods else ". ")
+    if only_a and only_b:
+        p2 += (f"{a_label} dishes stand out for {_join(only_a)}, while {b_label} dishes lean on "
+               f"{_join(only_b)}. ")
+    p2 += (f"This section will describe the historical and cultural connection between the two "
+           f"countries once it is generated from the AI prompt.")
+    return {"title": f"{a_label} & {b_label}", "subtitle": "Historical & Cultural Connection",
+            "paragraphs": [p1, p2], "source": "template", "prompt": CONNECTION_PROMPT}

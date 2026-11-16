@@ -62,14 +62,8 @@
       <!-- TEXT SEARCH FORM -->
       <form class="search-form active" id="text-search-form" action="/search-text" method="POST">
         
-        <!-- Search by dish name or by ingredients (panel revisions) -->
-        <input type="hidden" name="search_mode" id="text-search-mode" value="dish">
-        <!-- Ingredients sent with the search, so the target country only uses dishes that have them -->
-        <input type="hidden" name="ingredients" id="text-search-ingredients">
-        <div class="search-mode-toggle" role="tablist" aria-label="Search by">
-          <button type="button" class="search-mode-btn active" data-mode="dish" role="tab" aria-selected="true">DISH</button>
-          <button type="button" class="search-mode-btn" data-mode="ingredients" role="tab" aria-selected="false">INGREDIENTS</button>
-        </div>
+        <!-- Search by dish name (ingredients moved to the Ingredient sub-tab of "Search by tag") -->
+        <input type="hidden" name="search_mode" value="dish">
 
         <div class="form-group full-width" id="dish-mode-group">
           <label for="dish-name-input">DISH NAME</label>
@@ -90,19 +84,6 @@
             <ul id="dish-dropdown-list" class="dropdown-list hidden"></ul>
             <!-- The exact recipe picked from the list (some recipes share a name) -->
             <input type="hidden" name="recipe_id" id="dish-recipe-id">
-          </div>
-        </div>
-
-        <div class="form-group full-width" id="ingredient-mode-group" hidden>
-          <label for="ingredient-entry">INGREDIENTS <span class="label-hint">(press Enter or comma after each one)</span></label>
-          <div class="search-dropdown-wrapper">
-            <div class="ingredient-chip-input" id="ingredient-chip-input">
-              <div class="ingredient-chips" id="ingredient-chips"></div>
-              <input type="text" id="ingredient-entry"
-                     placeholder="Example: chicken, garlic, soy sauce" autocomplete="off">
-            </div>
-            <!-- Same dropdown as the dish name -->
-            <ul id="ingredient-dropdown-list" class="dropdown-list hidden"></ul>
           </div>
         </div>
 
@@ -150,37 +131,137 @@
         </div>
       </form>
 
-      <!-- TAG SEARCH FORM (panel revision: search by tags) -->
+      <!-- TAG SEARCH FORM: Region / Ingredient / Cooking method / Dish type.
+           Picks from every sub-tab are combined (dishes must match all of them).
+           Pick tags -> popup with the matching dishes -> pick one -> compared with the target country. -->
       <form class="search-form" id="tag-search-form" action="/search-text" method="POST" novalidate>
         <input type="hidden" name="search_mode" value="tags">
         <input type="hidden" name="dish_name" id="tag-dish-name">
         <input type="hidden" name="recipe_id" id="tag-recipe-id">
+        <input type="hidden" name="origin_country" id="tag-origin">
+        <!-- Ingredients go along so a specific target country only uses dishes that have them -->
+        <input type="hidden" name="ingredients" id="tag-ingredients">
 
-        <div class="form-group full-width">
-          <label>TAGS <span class="label-hint">(pick one or more; dishes must have all of them)</span></label>
-          <div class="home-tag-picker" id="home-tag-picker">
-            {% for group, tags in home_tag_groups().items() %}
-            <div class="home-tag-group">
-              <span class="home-tag-group-name">{{ group }}</span>
-              <div class="home-tag-options">
-                {% for t, n in tags %}
-                <label class="tag-toggle"><input type="checkbox" value="{{ t }}"><span>{{ t }} <small>{{ n }}</small></span></label>
-                {% endfor %}
-              </div>
+        <div class="search-mode-toggle tag-subtabs" role="tablist" aria-label="Search by">
+          <button type="button" class="search-mode-btn active" data-panel="region" role="tab" aria-selected="true" aria-controls="tag-panel-region">REGION</button>
+          <button type="button" class="search-mode-btn" data-panel="ingredient" role="tab" aria-selected="false" aria-controls="tag-panel-ingredient">INGREDIENT</button>
+          <button type="button" class="search-mode-btn" data-panel="method" role="tab" aria-selected="false" aria-controls="tag-panel-method">COOKING METHOD</button>
+          <button type="button" class="search-mode-btn" data-panel="type" role="tab" aria-selected="false" aria-controls="tag-panel-type">DISH TYPE</button>
+        </div>
+
+        <!-- Region tab: regions AND countries of origin (pick a country alone if you only
+             care where the dish is from) -->
+        <div class="form-group full-width tag-panel" id="tag-panel-region" data-panel="region" role="tabpanel"
+             data-options="{{ home_tag_groups().get('Region', []) | map('first') | list | tojson | forceescape }}"
+             data-countries="{{ home_country_options() | tojson | forceescape }}">
+          <label for="tag-entry-region">REGION OR COUNTRY <span class="label-hint">(type to search, press Enter to add)</span></label>
+          <div class="search-dropdown-wrapper">
+            <div class="ingredient-chip-input tag-chip-input">
+              <div class="ingredient-chips" data-chips></div>
+              <input type="text" id="tag-entry-region" placeholder="Example: Southeast Asia, Philippines, Japan" autocomplete="off">
             </div>
-            {% endfor %}
+            <ul class="dropdown-list hidden" data-dropdown></ul>
+          </div>
+          <div class="tag-quick-row">
+            <span class="tag-quick-label">Regions:</span>
+            <div class="tag-quick-options">
+                {% for t, n in home_tag_groups().get("Region", []) %}
+                <button type="button" class="tag-quick" data-value="{{ t }}" aria-pressed="false">{{ t }} <small>{{ n }}</small></button>
+                {% endfor %}
+            </div>
+          </div>
+          <div class="tag-quick-row">
+            <span class="tag-quick-label">Countries:</span>
+            <div class="tag-quick-options">
+                {% for value, label, n in home_country_options() %}
+                <button type="button" class="tag-quick" data-kind="country" data-value="{{ value }}" aria-pressed="false">{{ label }} <small>{{ n }}</small></button>
+                {% endfor %}
+            </div>
+          </div>
+        </div>
+        <div class="form-group full-width tag-panel" id="tag-panel-ingredient" data-panel="ingredient" role="tabpanel" hidden
+             data-free="1">
+          <label for="tag-entry-ingredient">INGREDIENT <span class="label-hint">(any ingredient in our dataset; press Enter or comma after each one)</span></label>
+          <div class="search-dropdown-wrapper">
+            <div class="ingredient-chip-input tag-chip-input">
+              <div class="ingredient-chips" data-chips></div>
+              <input type="text" id="tag-entry-ingredient" placeholder="Example: chicken, garlic, coconut milk" autocomplete="off">
+            </div>
+            <ul class="dropdown-list hidden" data-dropdown></ul>
+          </div>
+          <div class="tag-quick-row">
+            <span class="tag-quick-label">Quick picks:</span>
+            <div class="tag-quick-options">
+                {% for t, n in home_ingredient_quick() %}
+                <button type="button" class="tag-quick" data-value="{{ t }}" aria-pressed="false">{{ t | title }} <small>{{ n }}</small></button>
+                {% endfor %}
+            </div>
+          </div>
+        </div>
+        <div class="form-group full-width tag-panel" id="tag-panel-method" data-panel="method" role="tabpanel" hidden
+             data-options="{{ home_tag_groups().get('Cooking method', []) | map('first') | list | tojson | forceescape }}">
+          <label for="tag-entry-method">COOKING METHOD <span class="label-hint">(type to search, press Enter to add)</span></label>
+          <div class="search-dropdown-wrapper">
+            <div class="ingredient-chip-input tag-chip-input">
+              <div class="ingredient-chips" data-chips></div>
+              <input type="text" id="tag-entry-method" placeholder="Example: Grilled, Steamed" autocomplete="off">
+            </div>
+            <ul class="dropdown-list hidden" data-dropdown></ul>
+          </div>
+          <div class="tag-quick-row">
+            <span class="tag-quick-label">Quick picks:</span>
+            <div class="tag-quick-options">
+                {% for t, n in home_tag_groups().get("Cooking method", []) %}
+                <button type="button" class="tag-quick" data-value="{{ t }}" aria-pressed="false">{{ t }} <small>{{ n }}</small></button>
+                {% endfor %}
+            </div>
+          </div>
+        </div>
+        <div class="form-group full-width tag-panel" id="tag-panel-type" data-panel="type" role="tabpanel" hidden
+             data-options="{{ home_tag_groups().get('Dish type', []) | map('first') | list | tojson | forceescape }}">
+          <label for="tag-entry-type">DISH TYPE <span class="label-hint">(type to search, press Enter to add)</span></label>
+          <div class="search-dropdown-wrapper">
+            <div class="ingredient-chip-input tag-chip-input">
+              <div class="ingredient-chips" data-chips></div>
+              <input type="text" id="tag-entry-type" placeholder="Example: Noodles, Soup" autocomplete="off">
+            </div>
+            <ul class="dropdown-list hidden" data-dropdown></ul>
+          </div>
+          <div class="tag-quick-row">
+            <span class="tag-quick-label">Quick picks:</span>
+            <div class="tag-quick-options">
+                {% for t, n in home_tag_groups().get("Dish type", []) %}
+                <button type="button" class="tag-quick" data-value="{{ t }}" aria-pressed="false">{{ t }} <small>{{ n }}</small></button>
+                {% endfor %}
+            </div>
           </div>
         </div>
 
-        <!-- Filled in from the dish picked in the popup. No target to choose: it is compared with
-             the best match from any country. -->
-        <input type="hidden" name="origin_country" id="tag-origin">
-        <input type="hidden" name="target_country" value="any">
+        <!-- Everything picked in the four sub-tabs -->
+        <div class="tag-summary" id="tag-summary">
+          <div class="tag-summary-head">
+            <span class="tag-summary-title">YOUR TAGS <span id="tag-summary-count"></span></span>
+            <button type="button" class="tag-summary-clear" id="tag-summary-clear" hidden>Clear all</button>
+          </div>
+          <div class="tag-summary-chips" id="tag-summary-chips"></div>
+          <p class="tag-summary-empty" id="tag-summary-empty">Nothing picked yet. Add tags from any of the four tabs above.</p>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group full-width">
+            <label for="tag-target">TARGET COUNTRY</label>
+            <select id="tag-target" name="target_country" required>
+              <option value="" disabled selected>Select target country...</option>
+              <option value="any">Any country (best match)</option>
+              {% for c in countries %}<option value="{{ c.value }}">{{ c.label }}</option>{% endfor %}
+            </select>
+          </div>
+        </div>
 
         <div class="form-footer">
           <p class="form-note">
             Pick tags to see every dish that has them, then choose one<br>
-            to find its most similar dish from any country
+            to find its most similar dishes in the target country
           </p>
           <button type="submit" class="btn btn-red">FIND DISHES</button>
         </div>

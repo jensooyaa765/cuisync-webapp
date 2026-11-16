@@ -2120,3 +2120,22 @@
     margin-top: 4px;
   }
 }
+
+/* Link back to the overview list (similar dishes page) */
+.back-to-list {
+  display: inline-block;
+  margin-bottom: 14px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--gold-light);
+}
+.back-to-list:hover { color: #ffffff; text-decoration: underline; }
+
+/* ==========================================================================
+   TAG SHAPE RULE (whole system)
+   Clickable tags/chips are rounded (pills). Tags you can't click have square corners.
+   ========================================================================== */
+/* Ingredient / action / tool chips are labels, not buttons */
+.entity-chip,
+.entities-card .entity-chip,
+.panel-card .entity-chip { border-radius: 4px; }

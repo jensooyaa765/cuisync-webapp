@@ -13,6 +13,7 @@ class AppNav extends HTMLElement {
         <nav class="nav-links" id="nav-menu">
           <a href="/home">HOME</a>
           <a href="/analysis">ANALYSIS</a>
+          <a href="/dictionary">DICTIONARY</a>
           <a href="/faqs">FAQS</a>
           <a href="/login" class="nav-account" id="nav-account">LOGIN</a>
         </nav>
@@ -113,6 +114,7 @@ class AppFooter extends HTMLElement {
             <ul class="footer-links">
               <li><a href="/home">Home</a></li>
               <li><a href="/analysis">Analysis</a></li>
+              <li><a href="/dictionary">Dish Dictionary</a></li>
               <li><a href="/faqs">FAQS</a></li>
             </ul>
           </div>

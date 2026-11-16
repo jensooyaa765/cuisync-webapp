@@ -59,6 +59,9 @@
          ================================== -->
     <section class="section-dark dish-comparison-section">
       <div class="inner-content">
+        {% if overview_url %}
+        <a href="{{ overview_url }}" class="back-to-list">&larr; Back to all similar dishes</a>
+        {% endif %}
         <h2 class="section-heading">DISH COMPARISON</h2>
 
         <!-- Summary of the search -->
@@ -316,7 +319,7 @@
             : '<span class="badge-mini">SUMMARY</span><span class="footer-note">Built from the dataset (GPT unavailable).</span>';
           const adminNote = info.admin_fields.length ? `<span class="footer-note">${esc(info.admin_fields.join(' and '))} notes added by the CuiSync admin.</span>` : '';
           body.innerHTML = `
-            <div class="cultural-tags">${info.tags.map(t => `<a class="tag-chip" href="/explore?mode=tags&tag=${encodeURIComponent(t)}">${esc(t)}</a>`).join('')}</div>
+            <div class="cultural-tags">${info.tags.map(t => `<a class="tag-chip" href="/dictionary?tag=${encodeURIComponent(t)}">${esc(t)}</a>`).join('')}</div>
             <h4>Culture</h4><p>${esc(info.culture)}</p>
             <h4>History</h4><p>${esc(info.history)}</p>
             <h4>Health &amp; nutrition</h4><ul class="health-list">${health}</ul>

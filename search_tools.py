@@ -230,6 +230,31 @@ class IngredientSearch:
         close = difflib.get_close_matches(q, self.items, n=1, cutoff=0.75)
         return [self.index[close[0]]] if close else []
 
+    # Words after the ingredient that mean "made from it", not the ingredient itself
+    # ("chicken stock", "fish sauce", "rice vinegar", "rice noodles", "egg noodles")
+    MADE_FROM = CONDIMENT_WORDS | {"flour", "vinegar", "wine", "paper", "noodle", "noodles",
+                                   "vermicelli", "starch", "cake", "cakes", "sauce", "paste",
+                                   "plant", "roll", "wrap", "wrapper", "wrappers", "syrup",
+                                   "ketchup", "soup"}
+
+    def family(self, ingredient):
+        """Vocabulary items that are the ingredient itself in another form or cut."""
+        q = _norm(ingredient)
+        q = q[:-1] if q.endswith("s") and q[:-1] in self.index else q
+        if not q:
+            return []
+        pattern = re.compile(r"\b" + re.escape(q) + r"(?:s|es)?\b")
+        out = []
+        for n, item in enumerate(self.items):
+            m = pattern.search(item)
+            if not m:
+                continue
+            after = item[m.end():].split()
+            if after and set(after) & self.MADE_FROM:
+                continue
+            out.append(n)
+        return out
+
     def search(self, recipes, ingredients, country="", limit=60):
         resolved = [(ing, self.resolve(ing)) for ing in ingredients]
         known = [(ing, ids) for ing, ids in resolved if ids]
@@ -239,9 +264,13 @@ class IngredientSearch:
         q_vecs = np.stack([self.vecs[ids].mean(axis=0) / (np.linalg.norm(self.vecs[ids].mean(axis=0)) or 1)
                            for _, ids in known])
         sim_all = np.clip((q_vecs @ self.vecs.T - self.FLOOR) / (1 - self.FLOOR), 0, 1)
-        # exact vocabulary hits always count as a full match
-        for row, (_, ids) in enumerate(known):
+        # exact vocabulary hits always count as a full match, and so do cuts/forms of the
+        # ingredient ("chicken" also finds "chicken thigh", "chicken legs", "ground pork")
+        for row, (ing, ids) in enumerate(known):
             sim_all[row, ids] = 1.0
+            family = self.family(ing)
+            if family:
+                sim_all[row, family] = 1.0
         results = []
         for idx, r in enumerate(recipes):
             if country and r["country"].lower() != country.lower():
