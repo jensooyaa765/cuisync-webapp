@@ -709,6 +709,16 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
         shap_values=shapley,
         influence=influence or {},
         overview_url=url_for("similar_dishes", **link_params),
+        # Clickable tags on the two dish cards (they open the Dish Dictionary)
+        source_tags=search_tools.recipe_tags(RECIPES[source_idx], STORE.region_of),
+        target_tags=search_tools.recipe_tags(RECIPES[best_index], STORE.region_of),
+        # Cultural & History tab: connection between the two countries (template for now)
+        connection=cultural_info.country_connection(
+            RECIPES, source_dish["country"],
+            None if recommended_dish["country"].upper() == source_dish["country"].upper()
+            else recommended_dish["country"].upper(),
+            STORE.label_of, STORE.region_of, parse_items, dish_title=source_dish["title"].strip(),
+        ),
     )
 
 
@@ -1511,6 +1521,36 @@ def explore():
 
 
 # ---------------- Dish Dictionary (every dish in the dataset, search + filters) ----------------
+DICTIONARY_ENTITIES = {
+    "ingredient": ("ingredient_text", "Ingredient"),
+    "action": ("action_text", "Cooking action"),
+    "cookware": ("cookware_text", "Cookware"),
+    "utensil": ("utensil_text", "Utensil"),
+}
+
+
+_ALLERGEN_CACHE = {}   # (title, ingredient_text) -> allergen names (finding them is slow-ish)
+
+
+def dish_allergens(recipe):
+    key = (recipe.get("title"), recipe.get("ingredient_text"))
+    if key not in _ALLERGEN_CACHE:
+        _ALLERGEN_CACHE[key] = [a["name"] for a in cultural_info.find_allergens(recipe)]
+    return _ALLERGEN_CACHE[key]
+
+
+def entity_matches(item, wanted):
+    """"pork" matches "pork", "pork belly", "ground pork" but not "pork stock" (same rule as the
+    ingredient search in search_tools.py)."""
+    item = item.lower()
+    if item == wanted:
+        return True
+    m = re.search(r"\b" + re.escape(wanted) + r"(?:s|es)?\b", item)
+    if not m:
+        return False
+    after = item[m.end():].split()
+    return not (after and set(after) & search_tools.IngredientSearch.MADE_FROM)
+
 @app.route("/dictionary")
 def dictionary():
     """All dishes in the dataset. Clickable tags anywhere in the system link here
@@ -1530,11 +1570,28 @@ def dictionary():
             "c": country,
             "l": STORE.label_of(r["country"]),
             "g": search_tools.recipe_tags(r, STORE.region_of),
+            "x": dish_allergens(r),   # allergens, for the "Don't show" filter
             "i": r.get("image_link") or "",
         })
     tag_groups, _ = search_tools.all_tags([RECIPES[d["id"]] for d in dishes], STORE.region_of)
+
+    # Ingredient / cooking action / cookware / utensil links (from the comparison page):
+    # the matching dishes are found here, so the page doesn't need every recipe's item lists.
+    entity_filters = []
+    for kind, (field, label) in DICTIONARY_ENTITIES.items():
+        for wanted in request.args.getlist(kind):
+            wanted = " ".join(wanted.lower().split())
+            if not wanted:
+                continue
+            ids = [d["id"] for d in dishes
+                   if any(entity_matches(item, wanted) for item in parse_items(RECIPES[d["id"]].get(field, "")))]
+            entity_filters.append({"kind": kind, "label": label, "value": wanted, "ids": ids})
+    allergen_counts = Counter(a for d in dishes for a in d["x"])
     return render_template(
         "dictionary.html",
+        entity_filters=entity_filters,
+        # [(allergen, number of dishes that HAVE it)] for the "Don't show" dropdown
+        allergen_options=[(a, allergen_counts.get(a, 0)) for a in cultural_info.ALLERGENS],
         dishes=dishes,
         countries=[{**c, "count": counts[c["value"]]} for c in STORE.dropdown_countries()],
         tag_groups=tag_groups,

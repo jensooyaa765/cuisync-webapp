@@ -30,8 +30,8 @@
     <header class="dict-header">
       <h1 class="dict-title">Dish Dictionary</h1>
       <p class="dict-lead">
-        Browse every dish in the CuiSync dataset. Search by name, filter by origin country and tags,
-        and sort the results.
+        Browse every dish in the CuiSync dataset. Search by name, filter by origin country, choose tags to
+        show or leave out (allergens too), and sort the results.
       </p>
     </header>
 
@@ -40,14 +40,14 @@
       <label class="dict-search">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
         <span class="sr-only">Search dishes by name</span>
-        <input type="search" id="dict-q" placeholder="Search dishes by name or alternative name" autocomplete="off">
+        <input type="search" id="dict-q" placeholder="Search dish names" autocomplete="off">
       </label>
 
       <!-- Origin (more than one allowed) -->
       <div class="dict-dd" data-dd="country">
         <button type="button" class="dict-dd-btn" aria-haspopup="true" aria-expanded="false">
           <span class="dict-dd-label">Origin:</span>
-          <span class="dict-dd-value" data-dd-value>All countries ({{ countries | length }})</span>
+          <span class="dict-dd-value" data-dd-value>All</span>
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
         </button>
         <div class="dict-dd-panel" hidden>
@@ -66,18 +66,50 @@
       <!-- Tags (more than one allowed; dishes must have all of them) -->
       <div class="dict-dd dict-dd--wide" data-dd="tag">
         <button type="button" class="dict-dd-btn" aria-haspopup="true" aria-expanded="false">
-          <span class="dict-dd-label">Tags:</span>
-          <span class="dict-dd-value" data-dd-value>All tags</span>
+          <span class="dict-dd-label">Show:</span>
+          <span class="dict-dd-value" data-dd-value>All</span>
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
         </button>
         <div class="dict-dd-panel" hidden>
-          <p class="dict-dd-hint">Pick one or more tags. Dishes must have all of them.</p>
+          <p class="dict-dd-hint">Show only dishes that have all of these tags.</p>
           {% for group, tags in tag_groups.items() %}
           <p class="dict-dd-group">{{ group }}</p>
           <div class="dict-dd-options dict-dd-options--chips">
             {% for t, n in tags %}
             <label class="dict-check dict-check--chip">
               <input type="checkbox" name="tag" value="{{ t }}">
+              <span>{{ t }} <small>{{ n }}</small></span>
+            </label>
+            {% endfor %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Hide: tags and allergens to leave out (a dish with ANY of them is hidden) -->
+      <div class="dict-dd dict-dd--wide dict-dd--exclude" data-dd="exclude">
+        <button type="button" class="dict-dd-btn" aria-haspopup="true" aria-expanded="false">
+          <span class="dict-dd-label">Hide:</span>
+          <span class="dict-dd-value" data-dd-value>None</span>
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="dict-dd-panel" hidden>
+          <p class="dict-dd-hint">Hide dishes that have any of these. Good for allergies and diets.</p>
+          <p class="dict-dd-group">Allergens</p>
+          <div class="dict-dd-options dict-dd-options--chips">
+            {% for a, n in allergen_options %}
+            <label class="dict-check dict-check--chip dict-check--exclude">
+              <input type="checkbox" name="xallergen" value="{{ a }}">
+              <span>{{ a }} <small>{{ n }}</small></span>
+            </label>
+            {% endfor %}
+          </div>
+          {% for group, tags in tag_groups.items() %}
+          <p class="dict-dd-group">{{ group }}</p>
+          <div class="dict-dd-options dict-dd-options--chips">
+            {% for t, n in tags %}
+            <label class="dict-check dict-check--chip dict-check--exclude">
+              <input type="checkbox" name="xtag" value="{{ t }}">
               <span>{{ t }} <small>{{ n }}</small></span>
             </label>
             {% endfor %}
@@ -137,6 +169,7 @@
   </template>
 
   <script type="application/json" id="dict-data">{{ dishes | tojson }}</script>
+  <script type="application/json" id="dict-entities">{{ entity_filters | tojson }}</script>
   <script>window.DICT_NO_IMAGE = "{{ url_for('static', filename='assets/no-image.svg') }}";</script>
   <script src="{{ url_for('static', filename='scripts/components.js') }}"></script>
   <script src="{{ url_for('static', filename='scripts/dictionary.js') }}"></script>

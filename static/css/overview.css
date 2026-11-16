@@ -707,3 +707,22 @@ button.ov-modal-row:hover { background: rgba(255, 255, 255, 0.12); }
   .ov-card, .ov-country-card { transition: none; }
   .ov-card:hover, .ov-country-card:hover { transform: none; }
 }
+
+/* ==========================================================================
+   PAGE MARGINS: same as the FAQs page (.faq-container in faqs.css)
+   1200px wide with 24px sides and 120px from the top; 96px / 16px up to 850px wide;
+   92px / 20px up to 480px wide.
+   ========================================================================== */
+.ov-container { max-width: 1200px; padding: 120px 24px 80px; }
+@media screen and (max-width: 850px) {
+  .ov-container {
+    padding: calc(96px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px))
+             calc(40px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  }
+}
+@media screen and (max-width: 480px) {
+  .ov-container {
+    padding: calc(92px + env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px))
+             calc(30px + env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px));
+  }
+}

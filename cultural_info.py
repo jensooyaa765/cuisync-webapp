@@ -204,6 +204,8 @@ def dish_info(recipe, region_label, country_label):
         "history": info["history"],
         "health": info["health"],
         "allergens": find_allergens(recipe),
+        "allergen_groups": list(ALLERGENS),   # every group, so the page can show all of them
+        "nutrition": nutrition_template(recipe),
         "source": source,
         "admin_fields": admin_fields,
     }
@@ -298,3 +300,30 @@ def country_connection(recipes, origin, target, label_of, region_of, parse_items
            f"countries once it is generated from the AI prompt.")
     return {"title": f"{a_label} & {b_label}", "subtitle": "Historical & Cultural Connection",
             "paragraphs": [p1, p2], "source": "template", "prompt": CONNECTION_PROMPT}
+
+
+# ---------------- Nutrition (Health Info tab of the comparison page) ----------------
+# TEMPLATE VERSION. The values (calories, grams, mg) will come from a nutrition API.
+# Until then each row only says which of the dish's own ingredients drive it, and the
+# value is left empty, so nothing is made up.
+NUTRIENT_SOURCES = [
+    ("Calories", None),   # needs the API (depends on amounts)
+    ("Protein", ("chicken", "pork", "beef", "lamb", "mutton", "goat", "duck", "turkey", "fish", "salmon",
+                 "tuna", "shrimp", "prawn", "squid", "crab", "clam", "mussel", "egg", "tofu", "tempeh",
+                 "lentil", "chickpea", "bean", "dal", "paneer", "offal", "liver")),
+    ("Fat", ("oil", "butter", "ghee", "lard", "coconut milk", "coconut cream", "cream", "cheese", "peanut",
+             "cashew", "pork belly", "chicharon", "bacon", "sausage")),
+    ("Carbohydrates", ("rice", "noodle", "vermicelli", "bread", "flour", "potato", "sweet potato", "sugar",
+                       "corn", "pasta", "roti", "naan", "tapioca", "cassava")),
+    ("Sodium", ("salt", "soy sauce", "fish sauce", "shrimp paste", "oyster sauce", "miso", "bagoong",
+                "stock", "broth", "bouillon", "kimchi", "pickled")),
+]
+
+
+def nutrition_template(recipe):
+    ings = _ingredients(recipe)
+    rows = []
+    for name, words in NUTRIENT_SOURCES:
+        sources = [] if words is None else sorted({i for i in ings if any(_has(i, w) for w in words)})
+        rows.append({"name": name, "value": None, "from": sources[:4]})
+    return {"rows": rows, "source": "template"}

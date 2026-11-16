@@ -59,9 +59,13 @@
          ================================== -->
     <section class="section-dark dish-comparison-section">
       <div class="inner-content">
-        {% if overview_url %}
-        <a href="{{ overview_url }}" class="back-to-list">&larr; Back to all similar dishes</a>
-        {% endif %}
+        <nav class="rt-breadcrumb" aria-label="Breadcrumb">
+          <a href="{{ url_for('home') }}">Home</a>
+          <span aria-hidden="true">/</span>
+          {% if overview_url %}<a href="{{ overview_url }}">Results</a>{% else %}<span>Results</span>{% endif %}
+          <span aria-hidden="true">/</span>
+          <span class="current">{{ source_dish.title }} vs {{ recommended_dish.title if recommended_dish else '' }}</span>
+        </nav>
         <h2 class="section-heading">DISH COMPARISON</h2>
 
         <!-- Summary of the search -->
@@ -97,14 +101,16 @@
                    onerror="this.onerror=null;this.src='{{ url_for('static', filename='assets/no-image.svg') }}'"
                    alt="{{ source_dish.title }}"
                    referrerpolicy="no-referrer">
-              <span class="img-badge">{{ source_dish.country_region }}, {{ source_dish.country }}</span>
+              <span class="img-badge">{{ country_label(source_dish.country) }}</span>
             </div>
             <div class="dish-card-body">
               <h3 class="dish-title">{{ source_dish.title }}</h3>
               {% if source_dish.alternative_title %}
                 <p class="dish-alt"><i>{{ source_dish.alternative_title }}</i></p>
               {% endif %}
-              <p class="dish-subtitle">{{ (source_dish.region or 'No Specific') | upper }} REGION</p>
+              <div class="dish-card-tags">
+                {% for t in source_tags[:5] %}<a class="tag-chip {{ 'is-region' if loop.first and t.endswith('Asia') }}" href="{{ url_for('dictionary', tag=t) }}" title="See every dish tagged {{ t }}">{{ t }}</a>{% endfor %}
+              </div>
               {% if source_dish and source_dish.recipe_link %}
                 <div class="btn-links">
                   <a href="{{ source_dish.recipe_link }}" target="_blank" rel="noopener" class="btn-primary-action">
@@ -131,14 +137,16 @@
                    onerror="this.onerror=null;this.src='{{ url_for('static', filename='assets/no-image.svg') }}'"
                    alt="{% if recommended_dish %}{{ recommended_dish.title }}{% endif %}"
                    referrerpolicy="no-referrer">
-              <span class="img-badge">{% if recommended_dish %}{{ source_dish.country_region }}, {{ recommended_dish.country }}{% endif %}</span>
+              {% if recommended_dish %}<span class="img-badge">{{ country_label(recommended_dish.country) }}</span>{% endif %}
             </div>
             <div class="dish-card-body">
               <h3 class="dish-title">{% if recommended_dish %}{{ recommended_dish.title }}{% endif %}</h3>
               {% if recommended_dish and recommended_dish.alternative_title %}
                 <p class="dish-alt"><i>{{ recommended_dish.alternative_title }}</i></p>
               {% endif %}
-              <p class="dish-subtitle">{% if recommended_dish %}{{ (recommended_dish.region or 'No Specific') | upper }} REGION{% endif %}</p>
+              <div class="dish-card-tags">
+                {% for t in target_tags[:5] %}<a class="tag-chip {{ 'is-region' if loop.first and t.endswith('Asia') }}" href="{{ url_for('dictionary', tag=t) }}" title="See every dish tagged {{ t }}">{{ t }}</a>{% endfor %}
+              </div>
 
               {% if recommended_dish and recommended_dish.recipe_link %}
                 <div class="btn-links">
@@ -157,179 +165,270 @@
     </section>
 
     <!-- ==================================
-         SECTION 2: RECIPE BREAKDOWN (extracted entities)
+         COMPARISON DETAILS: four tabs (the tab bar sticks under the navbar while scrolling)
          ================================== -->
-    <section class="section-dark recipe-breakdown-section">
+    <section class="section-dark rt-section" id="comparison-details">
       <div class="inner-content">
-        <div class="section-head-split">
-          <h2 class="section-heading">RECIPE BREAKDOWN</h2>
-          <p class="section-subheading">
-            The ingredients, cooking actions and tools pulled from both recipes: what the two dishes share, and what sets each one apart.
-          </p>
-        </div>
-
-        <div class="entities-card">
-
-          <!-- Category filter buttons -->
-          <div class="entity-filters">
-            <label class="filter-pill pill-all">
-              <input type="radio" name="entity_filter" value="all" checked hidden>
-              <span>ALL</span>
-            </label>
-
-            <label class="filter-pill pill-shared">
-              <input type="radio" name="entity_filter" value="shared" hidden>
-              <span>SHARED</span>
-            </label>
-
-            <label class="filter-pill pill-pho">
-              <input type="radio" name="entity_filter" value="source" hidden>
-              <span>{{ source_dish.title | upper }}</span>
-            </label>
-
-            <label class="filter-pill pill-batchoy">
-              <input type="radio" name="entity_filter" value="target" hidden>
-              <span>{% if recommended_dish %}{{ recommended_dish.title | upper }}{% else %}{{ target_country | upper }} DISH{% endif %}</span>
-            </label>
+        <div class="rt-card" id="rt-card">
+          <div class="rt-sentinel" id="rt-sentinel" aria-hidden="true"></div>
+          <div class="rt-tabs" role="tablist" aria-label="Comparison details" id="rt-tabs">
+            <button type="button" class="rt-tab is-active" role="tab" id="rt-tab-recipe" data-tab="recipe" aria-controls="rt-panel-recipe" aria-selected="true">RECIPE BREAKDOWN</button>
+            <button type="button" class="rt-tab" role="tab" id="rt-tab-similarity" data-tab="similarity" aria-controls="rt-panel-similarity" aria-selected="false" tabindex="-1">SIMILARITY SUMMARY</button>
+            <button type="button" class="rt-tab" role="tab" id="rt-tab-culture" data-tab="culture" aria-controls="rt-panel-culture" aria-selected="false" tabindex="-1">CULTURAL &amp; HISTORY</button>
+            <button type="button" class="rt-tab" role="tab" id="rt-tab-health" data-tab="health" aria-controls="rt-panel-health" aria-selected="false" tabindex="-1">HEALTH INFO</button>
           </div>
 
-          <!-- Gold = shared, maroon = only in the searched dish, green = only in the recommended dish -->
-          {% for key, label in [('ingredients', 'INGREDIENTS'), ('actions', 'COOKING ACTIONS'), ('cookware', 'COOKWARES'), ('utensils', 'UTENSILS')] %}
-            {% set cat = entities[key] %}
-            <div class="entity-group">
-              <span class="entity-category-label">{{ label }}</span>
-              <div class="chips-wrapper">
-                {% for item in cat.shared %}
-                  <span class="entity-chip chip-gold" data-type="shared">{{ item }}</span>
-                {% endfor %}
-                {% for item in cat.source_unique %}
-                  <span class="entity-chip chip-maroon" data-type="source">{{ item }}</span>
-                {% endfor %}
-                {% for item in cat.target_unique %}
-                  <span class="entity-chip chip-green" data-type="target">{{ item }}</span>
-                {% endfor %}
+          <!-- ---------- RECIPE BREAKDOWN ---------- -->
+          <div class="rt-panel" id="rt-panel-recipe" role="tabpanel" aria-labelledby="rt-tab-recipe">
+            <div class="entities-card">
+              <p class="rt-intro">The ingredients, cooking actions and tools pulled from both recipes. Click any of them to see every dish that has it.</p>
+
+              <!-- Category filter buttons -->
+              <div class="entity-filters">
+                <label class="filter-pill pill-all">
+                  <input type="radio" name="entity_filter" value="all" checked hidden>
+                  <span>ALL</span>
+                </label>
+                <label class="filter-pill pill-shared">
+                  <input type="radio" name="entity_filter" value="shared" hidden>
+                  <span>SHARED</span>
+                </label>
+                <label class="filter-pill pill-pho">
+                  <input type="radio" name="entity_filter" value="source" hidden>
+                  <span>{{ source_dish.title | upper }}</span>
+                </label>
+                <label class="filter-pill pill-batchoy">
+                  <input type="radio" name="entity_filter" value="target" hidden>
+                  <span>{% if recommended_dish %}{{ recommended_dish.title | upper }}{% else %}{{ target_country | upper }} DISH{% endif %}</span>
+                </label>
               </div>
-            </div>
-          {% endfor %}
 
-        </div>
-      </div>
-    </section>
-
-    <!-- ==================================
-         SECTION 3: SIMILARITY SUMMARY
-         ================================== -->
-    <section class="section-light similarity-section" id="sim-summary">
-      <div class="inner-content">
-        <h2 class="section-heading dark-text">SIMILARITY SUMMARY</h2>
-        <div class="heading-rule"></div>
-
-        <div class="similarity-metrics-grid">
-          <!-- Donut: overall similarity -->
-          <div class="donut-box">
-            <div class="donut-chart" style="--percent: {{ score }};">
-              <div class="donut-center">
-                <span class="donut-percentage">{{ score }}%</span>
-              </div>
-            </div>
-            <span class="donut-label">OVERALL SIMILARITY SCORE</span>
-          </div>
-
-          <!-- Score per category from softmatch.py (these make up the overall score) -->
-          <div class="sim-bars">
-            {% for label, key in [('INGREDIENT SIMILARITY', 'ingredients'), ('COOKING ACTION SIMILARITY', 'actions'), ('UTENSIL SIMILARITY', 'utensils'), ('COOKWARE SIMILARITY', 'cookware')] %}
-              {% if feature_scores is defined and key in feature_scores %}
-                {% set pct = [ [ (feature_scores[key] * 100) | round | int, 0 ] | max, 100 ] | min %}
-              {% else %}
-                {% set pct = overlap_pct(entities[key]) | trim | int %}
-              {% endif %}
-              <div class="sim-bar">
-                <div class="sim-bar-info">
-                  <span>{{ label }}</span>
-                  <span>{{ pct }}%</span>
+              <!-- Gold = shared, maroon = only in the searched dish, green = only in the recommended dish.
+                   Each chip opens the Dish Dictionary filtered to that ingredient / action / tool. -->
+              {% for key, label, param in [('ingredients', 'INGREDIENTS', 'ingredient'), ('actions', 'COOKING ACTIONS', 'action'), ('cookware', 'COOKWARES', 'cookware'), ('utensils', 'UTENSILS', 'utensil')] %}
+                {% set cat = entities[key] %}
+                <div class="entity-group">
+                  <span class="entity-category-label">{{ label }}</span>
+                  <div class="chips-wrapper">
+                    {% for item in cat.shared %}
+                      <a class="entity-chip chip-gold" data-type="shared" href="{{ url_for('dictionary', **{param: item | lower}) }}" title="See every dish with {{ item | lower }}">{{ item }}</a>
+                    {% endfor %}
+                    {% for item in cat.source_unique %}
+                      <a class="entity-chip chip-maroon" data-type="source" href="{{ url_for('dictionary', **{param: item | lower}) }}" title="See every dish with {{ item | lower }}">{{ item }}</a>
+                    {% endfor %}
+                    {% for item in cat.target_unique %}
+                      <a class="entity-chip chip-green" data-type="target" href="{{ url_for('dictionary', **{param: item | lower}) }}" title="See every dish with {{ item | lower }}">{{ item }}</a>
+                    {% endfor %}
+                    {% if not (cat.shared or cat.source_unique or cat.target_unique) %}<span class="entity-empty">None listed.</span>{% endif %}
+                  </div>
                 </div>
-                <div class="sim-bar-track"><div class="sim-bar-fill" style="--pct: {{ pct }};"></div></div>
+              {% endfor %}
+            </div>
+          </div>
+
+          <!-- ---------- SIMILARITY SUMMARY ---------- -->
+          <div class="rt-panel similarity-section" id="rt-panel-similarity" role="tabpanel" aria-labelledby="rt-tab-similarity" hidden>
+            <div class="similarity-metrics-grid">
+              <!-- Donut: overall similarity -->
+              <div class="donut-box">
+                <div class="donut-chart" style="--percent: {{ score }};">
+                  <div class="donut-center">
+                    <span class="donut-percentage">{{ score }}%</span>
+                  </div>
+                </div>
+                <span class="donut-label">OVERALL SIMILARITY SCORE</span>
               </div>
-            {% endfor %}
+
+              <!-- Score per category from softmatch.py (these make up the overall score) -->
+              <div class="sim-bars">
+                {% for label, key in [('INGREDIENT SIMILARITY', 'ingredients'), ('COOKING ACTION SIMILARITY', 'actions'), ('UTENSIL SIMILARITY', 'utensils'), ('COOKWARE SIMILARITY', 'cookware')] %}
+                  {% if feature_scores is defined and key in feature_scores %}
+                    {% set pct = [ [ (feature_scores[key] * 100) | round | int, 0 ] | max, 100 ] | min %}
+                  {% else %}
+                    {% set pct = overlap_pct(entities[key]) | trim | int %}
+                  {% endif %}
+                  <div class="sim-bar">
+                    <div class="sim-bar-info">
+                      <span>{{ label }}</span>
+                      <span>{{ pct }}%</span>
+                    </div>
+                    <div class="sim-bar-track"><div class="sim-bar-fill" style="--pct: {{ pct }};"></div></div>
+                  </div>
+                {% endfor %}
+              </div>
+            </div>
+
+            <!-- GPT explanation card (from explainer.py) -->
+            <div class="quote-card">
+              <span class="quote-icon" aria-hidden="true">&ldquo;&rdquo;</span>
+              <p class="quote-text">
+                {% if explanation %}{{ explanation }}{% else %}No similarity explanation is available because no matching dish was found for this search.{% endif %}
+              </p>
+              <div class="quote-footer">
+                {% if explanation_source == 'ai' %}
+                <span class="badge-mini">AI EXPLANATION</span>
+                <span class="footer-note">Generated by GPT-4o</span>
+                {% else %}
+                <span class="badge-mini">SUMMARY</span>
+                <span class="footer-note">GPT unavailable. Showing a grounded template explanation.</span>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+
+          <!-- ---------- CULTURAL & HISTORY ---------- -->
+          <div class="rt-panel" id="rt-panel-culture" role="tabpanel" aria-labelledby="rt-tab-culture" hidden>
+            <div class="rt-columns">
+              {% for dish in [source_dish, recommended_dish] if dish %}
+              <article class="rt-column" data-idx="{{ dish.idx }}" data-part="culture">
+                <span class="rt-eyebrow">{{ 'YOUR DISH' if loop.first else 'MOST SIMILAR DISH' }} &middot; {{ country_label(dish.country) | upper }}</span>
+                <h3 class="rt-dish-name">{{ dish.title }}</h3>
+                <div class="rt-column-body"><p class="rt-loading">Loading cultural information&hellip;</p></div>
+              </article>
+              {% endfor %}
+            </div>
+            <div class="rt-connection">
+              <h4 class="rt-connection-title">CULTURAL CONNECTION</h4>
+              <p class="rt-connection-sub">{{ connection.title }} &middot; {{ connection.subtitle }}</p>
+              {% for p in connection.paragraphs %}<p>{{ p }}</p>{% endfor %}
+              <div class="quote-footer">
+                <span class="badge-mini">{{ 'AI-GENERATED' if connection.source == 'ai' else 'TEMPLATE PREVIEW' }}</span>
+                <span class="footer-note">{% if connection.source == 'ai' %}Written by GPT from a prompt. Verify before citing.{% else %}This section will be generated by AI from a prompt. Showing a template built from the dataset for now.{% endif %}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ---------- HEALTH INFO ---------- -->
+          <div class="rt-panel" id="rt-panel-health" role="tabpanel" aria-labelledby="rt-tab-health" hidden>
+            <div class="rt-columns rt-columns--split">
+              {% for dish in [source_dish, recommended_dish] if dish %}
+              <article class="rt-column" data-idx="{{ dish.idx }}" data-part="health">
+                <span class="rt-eyebrow">{{ 'YOUR DISH' if loop.first else 'MOST SIMILAR DISH' }} &middot; {{ country_label(dish.country) | upper }}</span>
+                <h3 class="rt-dish-name">{{ dish.title }}</h3>
+                <div class="rt-column-body"><p class="rt-loading">Loading health information&hellip;</p></div>
+              </article>
+              {% endfor %}
+            </div>
+            <div class="quote-footer rt-health-note">
+              <span class="badge-mini">TEMPLATE PREVIEW</span>
+              <span class="footer-note">Nutrition values will come from a nutrition API. For now each row shows which ingredients add to it. Filled allergen tags are in the dish; click any allergen to see dishes without it. Allergens are found from the listed ingredients only; always check the full recipe and product labels.</span>
+            </div>
           </div>
         </div>
-
-        <!-- GPT explanation card (from explainer.py) -->
-        <div class="quote-card">
-          <span class="quote-icon" aria-hidden="true">&ldquo;&rdquo;</span>
-          <p class="quote-text">
-            {% if explanation %}{{ explanation }}{% else %}No similarity explanation is available because no matching dish was found for this search.{% endif %}
-          </p>
-          <div class="quote-footer">
-            {% if explanation_source == 'ai' %}
-            <span class="badge-mini">AI EXPLANATION</span>
-            <span class="footer-note">Generated by GPT-4o</span>
-            {% else %}
-            <span class="badge-mini">SUMMARY</span>
-            <span class="footer-note">GPT unavailable. Showing a grounded template explanation.</span>
-            {% endif %}
-          </div>
-        </div>
-
       </div>
     </section>
 
+    <!-- Culture, history, health notes and allergens for both dishes (cultural_info.py), plus the tabs -->
+    <script>
+      (() => {
+        const esc = (t) => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-<!-- ==================================
-     CULTURAL & DIETARY INFORMATION (panel revision: culture, history, health benefits, allergens)
-     ================================== -->
-<section class="section-light cultural-section" id="cultural-info">
-  <div class="inner-content">
-    <h2 class="section-heading dark-text">CULTURAL &amp; DIETARY INFORMATION</h2>
-    <div class="heading-rule"></div>
-    <p class="cultural-intro">The culture and history behind each dish, plus nutrition notes and allergens taken from its ingredient list.</p>
-    <div class="cultural-grid">
-      {% for dish in [source_dish, recommended_dish] if dish %}
-      <article class="cultural-card" data-idx="{{ dish.idx }}">
-        <header>
-          <span class="cultural-eyebrow">{{ 'SEARCHED DISH' if loop.first else 'MOST SIMILAR DISH' }}</span>
-          <h3>{{ dish.title }}</h3>
-          <span class="cultural-country">{{ country_label(dish.country) }}</span>
-        </header>
-        <div class="cultural-body"><p class="cultural-loading">Loading cultural information&hellip;</p></div>
-      </article>
-      {% endfor %}
-    </div>
-    <p class="cultural-disclaimer">Allergens are found from the listed ingredients only. Always check the full recipe and product labels.</p>
-  </div>
-</section>
+        // ---------- tabs ----------
+        const card = document.getElementById('rt-card');
+        const tabs = Array.from(document.querySelectorAll('.rt-tab'));
+        const navHeight = () => parseInt(getComputedStyle(document.documentElement).getPropertyValue('--nav-h'), 10) || 56;
 
-<script>
-  (() => {
-    const esc = (t) => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    document.querySelectorAll('.cultural-card').forEach(card => {
-      const body = card.querySelector('.cultural-body');
-      fetch('/api/dish-info/' + card.dataset.idx)
-        .then(r => r.json())
-        .then(info => {
-          const allergens = info.allergens.length
-            ? info.allergens.map(a => `<li class="allergen${a.avoid ? ' allergen-avoid' : ''}" title="From: ${esc(a.from.join(', '))}">
-                 <strong>${esc(a.name)}</strong><span>${esc(a.from.join(', '))}</span>${a.avoid ? '<em>On your avoid list</em>' : ''}</li>`).join('')
-            : '<li class="allergen allergen-none">No common allergens found in the listed ingredients.</li>';
-          const health = info.health.length
-            ? info.health.map(h => `<li>${esc(h)}</li>`).join('')
-            : '<li>No nutrition notes for these ingredients yet.</li>';
+        function openTab(name, focus) {
+          tabs.forEach(t => {
+            const on = t.dataset.tab === name;
+            t.classList.toggle('is-active', on);
+            t.setAttribute('aria-selected', String(on));
+            t.tabIndex = on ? 0 : -1;
+            document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+            if (on && focus) t.focus();
+            // Phones: the tab bar scrolls sideways, so bring the open tab into view
+            if (on) {
+              const bar = t.parentElement;
+              bar.scrollLeft = t.offsetLeft - (bar.clientWidth - t.offsetWidth) / 2;
+            }
+          });
+          history.replaceState(null, '', `${location.pathname}${location.search}#${name}`);
+          // If the bar is stuck at the top, start the new tab from its beginning
+          const top = card.getBoundingClientRect().top;
+          if (top < navHeight()) window.scrollTo({ top: window.scrollY + top - navHeight(), behavior: 'smooth' });
+        }
+        tabs.forEach((t, i) => {
+          t.addEventListener('click', () => openTab(t.dataset.tab));
+          t.addEventListener('keydown', (e) => {
+            if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+            e.preventDefault();
+            const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+            openTab(next.dataset.tab, true);
+          });
+        });
+        const startTab = location.hash.slice(1);
+        if (tabs.some(t => t.dataset.tab === startTab)) openTab(startTab);
+
+        // Shadow on the tab bar while it is stuck under the navbar
+        const sentinel = document.getElementById('rt-sentinel');
+        if ('IntersectionObserver' in window && sentinel) {
+          new IntersectionObserver(([entry]) => {
+            document.getElementById('rt-tabs').classList.toggle('is-stuck',
+              !entry.isIntersecting && entry.boundingClientRect.top < navHeight() + 1);
+          }, { rootMargin: `-${navHeight() + 1}px 0px 0px 0px` }).observe(sentinel);
+        }
+
+        // ---------- culture + health for both dishes ----------
+        const tagLink = (t, extra = '') => `<a class="tag-chip ${extra}" href="/dictionary?tag=${encodeURIComponent(t)}">${esc(t)}</a>`;
+
+        function cultureHtml(info) {
           const badge = info.source === 'ai'
-            ? '<span class="badge-mini">AI-GENERATED</span><span class="footer-note">Culture, history and health notes by GPT. Verify before citing.</span>'
+            ? '<span class="badge-mini">AI-GENERATED</span><span class="footer-note">By GPT. Verify before citing.</span>'
             : '<span class="badge-mini">SUMMARY</span><span class="footer-note">Built from the dataset (GPT unavailable).</span>';
           const adminNote = info.admin_fields.length ? `<span class="footer-note">${esc(info.admin_fields.join(' and '))} notes added by the CuiSync admin.</span>` : '';
-          body.innerHTML = `
-            <div class="cultural-tags">${info.tags.map(t => `<a class="tag-chip" href="/dictionary?tag=${encodeURIComponent(t)}">${esc(t)}</a>`).join('')}</div>
+          return `
             <h4>Culture</h4><p>${esc(info.culture)}</p>
             <h4>History</h4><p>${esc(info.history)}</p>
-            <h4>Health &amp; nutrition</h4><ul class="health-list">${health}</ul>
-            <h4>Allergens</h4><ul class="allergen-list">${allergens}</ul>
             <div class="quote-footer">${badge}${adminNote}</div>`;
-        })
-        .catch(() => { body.innerHTML = '<p>Cultural information is not available right now.</p>'; });
-    });
-  })();
-</script>
+        }
+
+        function healthHtml(info) {
+          const rows = ((info.nutrition && info.nutrition.rows) || []).map(r => `
+            <li class="rt-nutrient">
+              <strong>${esc(r.name)}</strong>
+              <span>${r.value ? esc(r.value) : 'Value pending (nutrition API)'}${r.from && r.from.length ? ` &mdash; from ${esc(r.from.join(', '))}` : ''}</span>
+            </li>`).join('');
+          const notes = info.health.length
+            ? info.health.map(h => `<li>${esc(h)}</li>`).join('')
+            : '<li>No nutrition notes for these ingredients yet.</li>';
+          // Every allergen group as a tag: filled = in this dish, outlined = not.
+          // Each one opens the Dish Dictionary with the dishes that are free from it.
+          const found = new Map(info.allergens.map(a => [a.name, a]));
+          const groups = info.allergen_groups || info.allergens.map(a => a.name);
+          const allergenTags = groups.map(name => {
+            const a = found.get(name);
+            const cls = 'rt-allergen' + (a ? ' is-present' : '') + (a && a.avoid ? ' is-avoid' : '');
+            const title = a
+              ? `In this dish (from ${a.from.join(', ')})${a.avoid ? '. On your avoid list.' : ''} Click to see dishes without ${name}.`
+              : `Not in this dish. Click to see every dish without ${name}.`;
+            return `<li><a class="${cls}" href="/dictionary?xallergen=${encodeURIComponent(name)}" title="${esc(title)}">${esc(name)}</a></li>`;
+          }).join('');
+          const fromLine = info.allergens.length
+            ? `<p class="rt-allergen-from">${info.allergens.map(a => `<strong>${esc(a.name)}</strong> from ${esc(a.from.join(', '))}${a.avoid ? ' (on your avoid list)' : ''}`).join(' &middot; ')}</p>`
+            : '<p class="rt-allergen-from">None of these were found in the listed ingredients.</p>';
+          return `
+            <ul class="rt-nutrients">${rows}</ul>
+            <h4>Ingredient notes</h4><ul class="health-list">${notes}</ul>
+            <h4>Allergens</h4><ul class="rt-allergens">${allergenTags}</ul>${fromLine}`;
+        }
+
+        const byIdx = {};
+        document.querySelectorAll('.rt-column[data-idx]').forEach(col => {
+          (byIdx[col.dataset.idx] = byIdx[col.dataset.idx] || []).push(col);
+        });
+        Object.entries(byIdx).forEach(([idx, cols]) => {
+          fetch('/api/dish-info/' + idx)
+            .then(r => r.json())
+            .then(info => cols.forEach(col => {
+              col.querySelector('.rt-column-body').innerHTML =
+                col.dataset.part === 'culture' ? cultureHtml(info) : healthHtml(info);
+            }))
+            .catch(() => cols.forEach(col => {
+              col.querySelector('.rt-column-body').innerHTML = '<p>This information is not available right now.</p>';
+            }));
+        });
+      })();
+    </script>
 
 <!-- ==================================
      SECTION 3: GEOGRAPHICAL DISTRIBUTION
@@ -616,9 +715,10 @@
       ));
     }
 
-    function createChips(items, chipClass) {
+    // Each chip opens the Dish Dictionary filtered to that ingredient / action / tool
+    function createChips(items, chipClass, param) {
       if (!Array.isArray(items) || !items.length) return '';
-      return items.map(item => `<span class="entity-chip ${chipClass}">${escapeHtml(item)}</span>`).join('');
+      return items.map(item => `<a class="entity-chip ${chipClass}" href="/dictionary?${param}=${encodeURIComponent(String(item).toLowerCase())}" title="See every dish with ${escapeHtml(String(item).toLowerCase())}">${escapeHtml(item)}</a>`).join('');
     }
 
     // ----------------------------------------------------------------
@@ -919,7 +1019,7 @@
 
       // Chips for one category. Gold = shared, maroon = only in the searched dish,
       // green = only in this dish.
-      function renderEntityGroup(elementId, categoryData) {
+      function renderEntityGroup(elementId, categoryData, param) {
         const wrapper = document.getElementById(elementId);
         if (!wrapper) return;
         if (!categoryData) {
@@ -927,19 +1027,19 @@
           return;
         }
         wrapper.innerHTML =
-          createChips(categoryData.shared, 'chip-gold') +
-          createChips(categoryData.source_unique, 'chip-maroon') +
-          createChips(categoryData.target_unique, 'chip-green');
+          createChips(categoryData.shared, 'chip-gold', param) +
+          createChips(categoryData.source_unique, 'chip-maroon', param) +
+          createChips(categoryData.target_unique, 'chip-green', param);
       }
 
       // Breakdown and summary for this dish (not always the main one)
       const entities = getEntitiesFor(dish);
       const recipeTab = document.getElementById('tab-recipe');
       if (recipeTab) recipeTab.classList.toggle('is-origin', dish === MAP_DATA.sourceDish);
-      renderEntityGroup('modalIngredients', entities && entities.ingredients);
-      renderEntityGroup('modalActions', entities && entities.actions);
-      renderEntityGroup('modalCookware', entities && entities.cookware);
-      renderEntityGroup('modalUtensils', entities && entities.utensils);
+      renderEntityGroup('modalIngredients', entities && entities.ingredients, 'ingredient');
+      renderEntityGroup('modalActions', entities && entities.actions, 'action');
+      renderEntityGroup('modalCookware', entities && entities.cookware, 'cookware');
+      renderEntityGroup('modalUtensils', entities && entities.utensils, 'utensil');
       renderSimilarity(dish, entities);
     }
 
