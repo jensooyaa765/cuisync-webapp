@@ -588,6 +588,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!hiddenDishInput.value || !originSelect.value) {
       event.preventDefault();
       showErrorModal('Choose a Dish', 'Select one of the detected menu dishes before starting the comparison.');
+      return;
     }
+    // Dish chosen: pick the country to compare it with on the map, then send the form
+    event.preventDefault();
+    const option = originSelect.options[originSelect.selectedIndex];
+    window.CuiSyncCountryPicker.open({
+      dish: hiddenDishInput.value,
+      originValue: originSelect.value,
+      originLabel: option ? option.textContent : '',
+      onPick: (value) => {
+        targetSelect.value = value;
+        HTMLFormElement.prototype.submit.call(imageForm);
+      },
+    });
   });
 });

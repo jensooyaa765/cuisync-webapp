@@ -40,7 +40,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const mode = 'dish';
   let lastResults = null;      // so "Click to change" can reopen the popup
-  let submitAfterPick = false;
 
   // ---------------- country of origin ----------------
   function updateOriginDisplay() {
@@ -245,7 +244,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function closePopup() {
     popup.classList.add('hidden');
-    submitAfterPick = false;
     updateInputActions();
     const onClose = popupOnClose;
     popupOnClose = null;
@@ -338,17 +336,25 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function choose(d) {
-    const wantSubmit = submitAfterPick;
     closePopup();
     // The name goes in the search bar (with "Click to change"), no preview card
     pickDish(d, false);
     updateInputActions();
-    if (!targetSelect.value) {
-      targetSelect.classList.add('needs-attention');
-      targetSelect.focus();
-      return;
-    }
-    if (wantSubmit) sendForm();
+    askCountry();
+  }
+
+  // Map popup: which country to compare the dish with (fills the hidden target field, then searches)
+  function askCountry() {
+    const option = originSelect.options[originSelect.selectedIndex];
+    window.CuiSyncCountryPicker.open({
+      dish: dishInput.value.trim(),
+      originValue: originSelect.value,
+      originLabel: originSelect.value && option ? option.textContent : '',
+      onPick: (value) => {
+        targetSelect.value = value;
+        sendForm();
+      },
+    });
   }
 
   popupClose.addEventListener('click', closePopup);
@@ -356,10 +362,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !popup.classList.contains('hidden')) closePopup();
   });
-  targetSelect.addEventListener('change', () => {
-    targetSelect.classList.remove('needs-attention');
-  });
-
   // The tag tab (tag-search.js) uses the same popup
   window.CuiSyncPopup = { show: showPopup, close: closePopup };
 
@@ -382,8 +384,7 @@ document.addEventListener('DOMContentLoaded', () => {
     HTMLFormElement.prototype.submit.call(form);
   }
 
-  async function runSearch(autoSubmit) {
-    submitAfterPick = autoSubmit;
+  async function runSearch() {
     const q = dishInput.value.trim();
     if (!q) {
       showErrorModal('Enter a Dish', 'Type a dish name, for example Pho, Adobo or Ramen.');
@@ -405,18 +406,12 @@ document.addEventListener('DOMContentLoaded', () => {
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     hideDropdown();
-    // A dish is already chosen: go straight to the comparison
+    // A dish is already chosen: pick the country to compare it with
     if (hasPick()) {
-      if (!targetSelect.value) {
-        showErrorModal('Choose a Target Country',
-          'Select the target country (or "Any country") to compare the dish with.');
-        targetSelect.classList.add('needs-attention');
-        return;
-      }
-      sendForm();
+      askCountry();
       return;
     }
-    runSearch(Boolean(targetSelect.value));
+    runSearch();
   });
 
   // ---------------- open a past search: /?mode=dish&q=... ----------------
@@ -424,12 +419,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const params = new URLSearchParams(window.location.search);
   if (params.get('mode') === 'dish' && params.get('q')) {
     dishInput.value = params.get('q');
-    runSearch(false);
+    runSearch();
   }
 
   // ---------------- "Find similar dishes" from the Dish Dictionary: /?dish=<index> ----------------
-  // Puts that exact dish in the search bar (with its country and card); the user then picks
-  // a target country and searches.
+  // Puts that exact dish in the search bar (with its country and card) and opens the map popup
+  // to pick the country to compare it with.
   if (/^\d+$/.test(params.get('dish') || '')) {
     if (typeof switchTab === 'function') switchTab('text');
     fetch('/api/dish/' + params.get('dish'))
@@ -447,7 +442,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateInputActions();
         // Clean link, so a refresh doesn't pick it again
         history.replaceState(null, '', location.pathname + location.hash);
-        if (!targetSelect.value) targetSelect.classList.add('needs-attention');
+        askCountry();
       })
       .catch(() => {});
   }

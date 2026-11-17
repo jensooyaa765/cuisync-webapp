@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/base-style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/results.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/panel.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/results-map.css') }}">
 
 </head>
 <body class="results-page">
@@ -49,8 +50,6 @@
       <div class="inner-content">
         <nav class="rt-breadcrumb" aria-label="Breadcrumb">
           <a href="{{ url_for('home') }}">Home</a>
-          <span aria-hidden="true">/</span>
-          {% if overview_url %}<a href="{{ overview_url }}">Results</a>{% else %}<span>Results</span>{% endif %}
           <span aria-hidden="true">/</span>
           <span class="current">{{ source_dish.title }} vs {{ recommended_dish.title if recommended_dish else '' }}</span>
         </nav>
@@ -423,12 +422,83 @@
       })();
     </script>
 
-<!-- The map of other similar dishes moved to the results list page (overview.html). -->
+    <!-- ==================================
+         INTERACTIVE MAP: the most similar dishes (pins open their comparison),
+         with the top 10 in the side panel
+         ================================== -->
+    {% set mp = map_data %}
+    <section class="section-dark rmap-section" id="similar-map">
+      <div class="inner-content">
+        <h2 class="section-heading">Geographical distribution</h2>
+        <p class="rmap-intro">
+          {% if mp.target %}The 5 most similar dishes from {{ mp.target }} and the 15 most similar from other countries.
+          {% else %}The 20 most similar dishes from any country.{% endif %}
+          Click a dish to compare it with {{ source_dish.title }}.
+          <span class="rmap-hint">Drag to move the map; zoom with the + and &minus; buttons, Ctrl + scroll or a pinch.</span>
+        </p>
+
+        <div class="rmap" id="rmap">
+          <!-- Side panel: the top 10 (collapsible on bigger screens) -->
+          <aside class="rmap-side" id="rmap-side" aria-labelledby="rmap-list-title">
+            <button type="button" class="rmap-toggle" id="rmap-toggle" aria-expanded="true" aria-controls="rmap-side" aria-label="Hide the top 10 list">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+            </button>
+            <div class="rmap-panel">
+              <h3 class="rmap-list-title" id="rmap-list-title">Top {{ mp.listSize }} similar dishes</h3>
+              <ol class="rmap-list">
+                {% for d in mp.dishes if d.rank and d.rank <= mp.listSize %}
+                <li>
+                  <a class="rmap-item {{ 'is-current' if d.current }}" href="{{ d.url }}"
+                     {% if d.current %}aria-current="page"{% endif %}
+                     title="{{ 'You are viewing this comparison' if d.current else 'Compare with ' ~ d.title }}">
+                    <span class="rmap-item-rank">{{ d.rank }}</span>
+                    <img src="{{ d.image or url_for('static', filename='assets/no-image.svg') }}" alt="" loading="lazy" referrerpolicy="no-referrer"
+                         onerror="this.onerror=null;this.src='{{ url_for('static', filename='assets/no-image.svg') }}'">
+                    <span class="rmap-item-text">
+                      <span class="rmap-item-title">{{ d.title }}</span>
+                      <span class="rmap-item-meta">{{ d.label }}{% if d.current %} &middot; Viewing{% endif %}</span>
+                    </span>
+                    <span class="rmap-item-score">{{ d.score }}%</span>
+                  </a>
+                </li>
+                {% endfor %}
+              </ol>
+            </div>
+          </aside>
+
+          <div class="rmap-stage">
+          <div class="rmap-map" id="rmap-map">
+            <svg class="rmap-svg" id="rmap-svg" role="img" aria-label="Map of the most similar dishes"><g id="rmap-g"></g></svg>
+            <div class="rmap-pins" id="rmap-pins"></div>
+            <div class="rmap-tooltip" id="rmap-tooltip" hidden></div>
+          </div>
+
+          <div class="rmap-zoom" role="group" aria-label="Map controls">
+            <button type="button" id="rmap-focus" class="rmap-focus" aria-label="Focus on your dish" title="Focus on {{ source_dish.title }}">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+            </button>
+            <button type="button" id="rmap-zoom-in" aria-label="Zoom in">+</button>
+            <button type="button" id="rmap-zoom-out" aria-label="Zoom out">&minus;</button>
+            <button type="button" id="rmap-zoom-reset" class="rmap-zoom-reset" aria-label="Reset the map">Reset</button>
+          </div>
+          <div class="rmap-legend">
+            <span><i class="sw sw-origin"></i>{{ mp.source.label }} (your dish)</span>
+            {% if mp.target %}<span><i class="sw sw-target"></i>{{ mp.target }} (target)</span>{% endif %}
+            <span><i class="sw sw-other"></i>Other countries</span>
+          </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <script type="application/json" id="rmap-data">{{ mp | tojson }}</script>
   </main>
 
   <app-footer></app-footer>
 
   <script src="{{ url_for('static', filename='scripts/components.js') }}"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+  <script src="{{ url_for('static', filename='scripts/results-map.js') }}"></script>
 
   <!-- ==================================
        EXTRACTED ENTITIES FILTERING

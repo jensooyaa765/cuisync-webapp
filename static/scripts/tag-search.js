@@ -28,7 +28,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const picks = { region: [], country: [], ingredient: [], method: [], type: [] };
   let ingredientList = [];          // [name, dish count] from /api/ingredients
   let ingredientsLoading = null;
-  let pendingDish = null;           // dish picked before a target country was chosen
 
   const lower = (s) => String(s || '').toLowerCase();
 
@@ -98,7 +97,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function changed() {
-    pendingDish = null;
     renderAll();
   }
 
@@ -143,7 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
     summaryEmpty.hidden = total > 0;
     summaryClear.hidden = total === 0;
     summaryCount.textContent = total ? `(${total})` : '';
-    submitButton.textContent = pendingDish ? 'Search the dish' : 'Find dishes';
+    submitButton.textContent = 'Find dishes';
   }
 
   Object.values(panels).forEach((p) => {
@@ -314,25 +312,19 @@ document.addEventListener('DOMContentLoaded', () => {
     HTMLFormElement.prototype.submit.call(form);
   }
 
-  // Picking a dish sends it right away (or waits for the target country)
+  // Picking a dish opens the map popup to choose the country to compare it with
   function choose(d) {
     window.CuiSyncPopup.close();
-    if (!target.value) {
-      pendingDish = d;
-      renderAll();
-      target.classList.add('needs-attention');
-      target.focus();
-      showErrorModal('Choose a Target Country',
-        `You picked ${d.title}. Now select the target country (or "Any country") to compare it with.`);
-      return;
-    }
-    sendForm(d);
+    window.CuiSyncCountryPicker.open({
+      dish: d.title,
+      originValue: d.country_value,
+      originLabel: d.country_label || '',
+      onPick: (value) => {
+        target.value = value;
+        sendForm(d);
+      },
+    });
   }
-
-  target.addEventListener('change', () => {
-    target.classList.remove('needs-attention');
-    if (pendingDish) sendForm(pendingDish);
-  });
 
   async function findDishes() {
     Object.values(panels).forEach((p) => commitTyped(p));
@@ -362,10 +354,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    if (pendingDish && target.value) {
-      sendForm(pendingDish);
-      return;
-    }
     findDishes();
   });
 

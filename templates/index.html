@@ -120,8 +120,8 @@
         </div>
 
         <div class="form-row">
-          <!-- Hidden in ingredient mode: the origin comes from the dish picked in the popup -->
-          <div class="form-group half-width" id="text-origin-group">
+          <!-- The origin comes from the dish picked in the popup -->
+          <div class="form-group full-width" id="text-origin-group">
             <label id="text-origin-label">Country of origin</label>
             <!-- Filled in from the chosen dish (same as the image search). The hidden select sends the value. -->
             <div id="text-origin-display" class="origin-display is-placeholder"
@@ -132,20 +132,14 @@
             </select>
           </div>
 
-          <div class="form-group half-width" id="text-target-group">
-            <label for="text-target">Target country</label>
-            <select id="text-target" name="target_country" required>
-              <option value="" disabled selected>Select target country...</option>
-              <option value="any">Any country (best match)</option>
-              {% for c in countries %}<option value="{{ c.value }}">{{ c.label }}</option>{% endfor %}
-            </select>
-          </div>
+          <!-- Filled in by the country picker popup (country-picker.js) -->
+          <input type="hidden" id="text-target" name="target_country">
         </div>
 
         <div class="form-footer">
           <p class="form-note">
-            We'll find the most similar cuisine to the target country<br>
-            based on its ingredients and cooking processes
+            Pick your dish, then choose the country to compare it with<br>
+            on the map. We match ingredients and cooking processes.
           </p>
           <button type="submit" class="btn btn-red">Search the dish</button>     
         </div>
@@ -267,21 +261,13 @@
           <p class="tag-summary-empty" id="tag-summary-empty">Nothing picked yet. Add tags from any of the four tabs above.</p>
         </div>
 
-        <div class="form-row">
-          <div class="form-group full-width">
-            <label for="tag-target">Target country</label>
-            <select id="tag-target" name="target_country" required>
-              <option value="" disabled selected>Select target country...</option>
-              <option value="any">Any country (best match)</option>
-              {% for c in countries %}<option value="{{ c.value }}">{{ c.label }}</option>{% endfor %}
-            </select>
-          </div>
-        </div>
+        <!-- Filled in by the country picker popup (country-picker.js) -->
+        <input type="hidden" id="tag-target" name="target_country">
 
         <div class="form-footer">
           <p class="form-note">
-            Pick tags to see every dish that has them, then choose one<br>
-            to find its most similar dishes in the target country
+            Pick tags to see every dish that has them, choose one,<br>
+            then pick the country to compare it with on the map
           </p>
           <button type="submit" class="btn btn-red">Find dishes</button>
         </div>
@@ -367,7 +353,7 @@
         </div>
 
         <div class="form-row">
-          <div class="form-group half-width">
+          <div class="form-group full-width">
             <label id="img-origin-label">Country of origin</label>
             <!-- Filled in from the dish in the photo, not a dropdown. The hidden select sends the value. -->
             <div id="img-origin-display" class="origin-display is-placeholder"
@@ -378,22 +364,16 @@
             </select>
           </div>
 
-          <div class="form-group half-width">
-            <label for="img-target">Target country</label>
-            <select id="img-target" name="target_country" required>
-              <option value="" disabled selected>Select target country...</option>
-              <option value="any">Any country (best match)</option>
-              {% for c in countries %}<option value="{{ c.value }}">{{ c.label }}</option>{% endfor %}
-            </select>
-          </div>
+          <!-- Filled in by the country picker popup (country-picker.js) -->
+          <input type="hidden" id="img-target" name="target_country">
         </div>
 
         <hr>
 
         <div class="form-footer">
           <p class="form-note">
-            We'll find the most similar cuisine to the target country<br>
-            based on its ingredients and cooking processes.
+            Pick the dish from your photo, then choose the country<br>
+            to compare it with on the map.
           </p>
           <button type="submit" class="btn btn-red">Search the dish</button>
         </div>
@@ -459,7 +439,58 @@
     </div>
   </div>
 
+  <!-- COUNTRY PICKER: after a dish is chosen, pick the country to compare it with
+       (map on the left, list with "Any country" on the right). See country-picker.js -->
+  <div class="cp-overlay" id="cp-overlay" hidden>
+    <div class="cp-dialog" role="dialog" aria-modal="true" aria-labelledby="cp-title" tabindex="-1">
+      <button type="button" class="cp-close" id="cp-close" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+
+      <div class="cp-stage">
+        <div class="cp-map" id="cp-map">
+          <svg class="cp-svg" id="cp-svg" role="img" aria-label="Map of Asia: click a country to choose it"><g id="cp-g"></g></svg>
+          <div class="cp-tooltip" id="cp-tooltip" hidden></div>
+        </div>
+        <div class="cp-zoom" role="group" aria-label="Map controls">
+          <button type="button" id="cp-zoom-in" aria-label="Zoom in">+</button>
+          <button type="button" id="cp-zoom-out" aria-label="Zoom out">&minus;</button>
+          <button type="button" id="cp-zoom-reset" class="cp-zoom-reset" aria-label="Reset the map">Reset</button>
+        </div>
+        <div class="cp-legend">
+          <span><i class="sw sw-origin"></i>Your dish's country</span>
+          <span><i class="sw sw-pick"></i>Can be chosen</span>
+          <span><i class="sw sw-selected"></i>Chosen</span>
+        </div>
+      </div>
+
+      <aside class="cp-side">
+        <div class="cp-head">
+          <h3 class="cp-title" id="cp-title">Choose a country</h3>
+          <p class="cp-dish">Find dishes similar to <strong id="cp-dish-name"></strong>
+            <span id="cp-dish-country"></span> in&hellip;</p>
+        </div>
+        <button type="button" class="cp-option cp-option--any" data-value="any" aria-pressed="false">
+          <span class="cp-option-name">Any country</span>
+          <span class="cp-option-meta">Best matches from every other country</span>
+        </button>
+        <label class="cp-search">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+          <input type="search" id="cp-search" placeholder="Search countries" autocomplete="off" aria-label="Search countries">
+        </label>
+        <ul class="cp-list" id="cp-list"></ul>
+        <div class="cp-footer">
+          <button type="button" class="btn btn-red cp-go" id="cp-go" disabled>Choose a country</button>
+        </div>
+      </aside>
+    </div>
+  </div>
+  <script type="application/json" id="cp-countries">{{ home_country_options() | tojson }}</script>
+
   <script src="{{ url_for('static', filename='scripts/components.js') }}"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+  <script src="{{ url_for('static', filename='scripts/country-picker.js') }}"></script>
   <script src="{{ url_for('static', filename='scripts/ocr.js') }}"></script>
   
   <script>
@@ -843,7 +874,7 @@
       <p class="sim-warning-message" id="simWarningMessage"></p>
       <p class="sim-warning-note">Do you still want to see the closest dish we found?</p>
       <div class="sim-warning-actions">
-        <button type="button" class="sim-warning-btn secondary" id="simWarningNo">NO</button>
+        <button type="button" class="sim-warning-btn secondary" id="simWarningNo">No</button>
         <button type="button" class="sim-warning-btn primary" id="simWarningYes">View results anyway</button>
       </div>
     </div>
@@ -874,6 +905,7 @@
 
       function pickOption(select, wanted) {
         if (!select) return;
+        if (!select.options) { select.value = wanted || ""; return; }   // hidden field (target country)
         const match = [...select.options].find(
           (o) => o.value.trim().toLowerCase() === String(wanted || "").trim().toLowerCase()
         );

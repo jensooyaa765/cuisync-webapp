@@ -427,12 +427,11 @@ def ingredient_filter(ingredients, target_country, exclude_idx):
 
 def get_search_results(dish_name, origin_country, target_country, force=False, recipe_id=None,
                        search_type="text", ingredients="", pick=None, show_overview=False):
-    """One search, three outcomes:
-      - pick given          -> the detailed comparison page (results.html) for that dish
-      - show_overview=True  -> the list of similar dishes (overview.html)
-      - neither (a search form was sent) -> check the search, save it to the history and
-        redirect to the overview page, so the browser's back button works without
-        "Confirm form resubmission".
+    """One search, two outcomes:
+      - pick given -> the comparison page (results.html) for that dish
+      - no pick (a search form was sent, or an old /similar-dishes link) -> check the search,
+        save it to the history (new searches only) and redirect to the comparison page with
+        the best match, so the browser's back button works without "Confirm form resubmission".
     """
     requested_target = (target_country or "").strip()
     # "Any" target country (panel revision): look in every country except the dish's own.
@@ -540,7 +539,8 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
         target_indices, key=lambda index: total_scores[index], reverse=True
     )
 
-    # The dish picked on the overview page (falls back to the best match if it isn't allowed)
+    # The dish to compare with (from a map pin, the top 10 list or a recent search).
+    # Falls back to the best match if it isn't in the target country.
     picked = None
     if pick not in (None, ""):
         try:
@@ -565,7 +565,7 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
             ingredients,
         )
 
-    # Links between the overview page and the comparison page carry the same search
+    # Links to other comparisons of the same search (map pins, top 10 list)
     link_params = {
         "dish_name": source_dish["title"].strip(),
         "origin_country": source_dish["country"].lower(),
@@ -589,11 +589,13 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
             score=round(float(total_scores[best_index]) * 100, 2),
             query=json.dumps({"ingredients": ingredients}) if ingredients else "",
         )
-        return redirect(url_for("similar_dishes", **link_params))
-
     if picked is None:
-        return render_overview(source_dish, source_idx, ordered_targets, total_scores,
-                               target_country, target_any, ingredient_note, link_params)
+        # Straight to the comparison with the best match
+        return redirect(url_for("compare", pick=int(best_index), **link_params))
+
+    # Interactive map at the bottom of the page (made before target_country changes below)
+    map_data = results_map(source_idx, best_index, ordered_targets, total_scores,
+                           target_any, target_country, link_params)
 
     if target_any:
         # From here on the target is the country of the picked dish
@@ -727,7 +729,7 @@ def get_search_results(dish_name, origin_country, target_country, force=False, r
         feature_scores=feature_scores,
         shap_values=shapley,
         influence=influence or {},
-        overview_url=url_for("similar_dishes", **link_params),
+        map_data=map_data,
         dish_rank=dish_rank,
         rank_total=len(ordered_targets),
         rank_scope=rank_scope,
@@ -839,163 +841,64 @@ def clear_recent_searches():
     return redirect(url_for("recent_searches"))
 
 
-# ---------------- Overview page (list of similar dishes before the comparison) ----------------
-OVERVIEW_LIMIT = 60          # dishes sent to the list (shown 12 at a time)
-# Tag groups for "Most common tags in results" (same groups as the home page tag picker)
-def tag_group(tag):
-    if tag.endswith("Asia"):
-        return "Region"
-    if tag in search_tools.METHOD_TAGS:
-        return "Cooking method"
-    if tag in search_tools.PROTEIN_TAGS:
-        return "Main protein"
-    if tag in search_tools.TYPE_TAGS:
-        return "Dish type"
-    if tag in ("Spicy", "Vegetarian"):
-        return "Diet & flavor"
-    return "Custom"
+# ---------------- Interactive map on the comparison page ----------------
+MAP_TARGET_PINS = 5     # with a target country: its 5 most similar dishes...
+MAP_OTHER_PINS = 15     # ...and the 15 most similar from every other country
+MAP_ANY_PINS = 20       # with "Any country": the 20 most similar from any country
+MAP_LIST_SIZE = 10      # the side panel lists the top 10 of the pins
 
 
-TAG_GROUP_ORDER = ("Region", "Main protein", "Cooking method", "Dish type", "Diet & flavor", "Custom")
-# Groups shown in "Most common tags in results" (same as the home page tag search sub-tabs)
-COMMON_TAG_GROUPS = ("Region", "Ingredient", "Cooking method", "Dish type")
-# Too basic to say anything about a group of dishes
-COMMON_INGREDIENT_SKIP = {"Salt", "Water", "Oil", "Vegetable Oil", "Cooking Oil", "Olive Oil", "Pepper",
-                          "Black Pepper", "Sugar", "White Sugar", "Ice", "Hot Water", "Cold Water",
-                          "Neutral Oil", "Cornstarch"}
+def results_map(source_idx, current_idx, ordered_targets, total_scores, target_any, target_country,
+                link_params):
+    """Pins for the map: the searched dish plus the most similar dishes (see the limits above),
+    ranked by similarity. Each pin links to its own comparison page."""
+    origin = RECIPES[source_idx]["country"].lower()
+    target = None if target_any else target_country.lower()
+    if target_any:
+        chosen = list(ordered_targets[:MAP_ANY_PINS])
+    else:
+        others = [int(i) for i in np.argsort(total_scores)[::-1]
+                  if int(i) != source_idx and RECIPES[int(i)]["country"].lower() not in (origin, target)]
+        chosen = list(ordered_targets[:MAP_TARGET_PINS]) + others[:MAP_OTHER_PINS]
+    chosen.sort(key=lambda i: total_scores[i], reverse=True)
 
+    def pin(idx, rank):
+        card = dish_card(int(idx), float(total_scores[idx]))
+        country = card["country_value"]
+        in_target = target_any or country == target
+        # A dish from another country is compared with that country as the target
+        params = dict(link_params) if in_target else {
+            **{k: v for k, v in link_params.items() if k != "ingredients"}, "target_country": country}
+        return {
+            "idx": int(idx), "rank": rank, "score": card["score"],
+            "title": card["title"], "country": card["country"], "label": card["country_label"],
+            "image": card["image_link"], "url": url_for("compare", pick=int(idx), **params),
+            "current": int(idx) == int(current_idx), "inTarget": bool(in_target and not target_any),
+        }
 
-def render_overview(source_dish, source_idx, ordered_targets, total_scores, target_country,
-                    target_any, ingredient_note, link_params):
-    shown = ordered_targets[:OVERVIEW_LIMIT]
+    dishes = [pin(idx, rank) for rank, idx in enumerate(chosen, 1)]
+    if int(current_idx) not in set(chosen):
+        dishes.append(pin(current_idx, None))   # the dish on this page, even if it's further down
 
-    results = []
-    for rank, idx in enumerate(shown, 1):
-        card = dish_card(idx, float(total_scores[idx]))
-        card["rank"] = rank
-        card["url"] = url_for("compare", pick=idx, **link_params)
-        results.append(card)
-
-    # Filter chips above the list: countries in the list and their most common tags
-    country_counts = Counter(r["country"] for r in results)
-    tag_counts = Counter(t for r in results for t in r["tags"])
-
-    # Most common tags in the list: Region, Ingredient, Cooking method, Dish type
-    # (each links to the Dish Dictionary, filtered to it)
-    grouped = {}
-    for tag, n in tag_counts.most_common():
-        group = tag_group(tag)
-        if group in COMMON_TAG_GROUPS:
-            grouped.setdefault(group, []).append(
-                {"name": tag, "count": n, "url": url_for("dictionary", tag=tag)})
-    ingredient_counts = Counter(
-        i for idx in shown for i in set(parse_items(RECIPES[idx].get("ingredient_text", "")))
-        if i not in COMMON_INGREDIENT_SKIP)
-    grouped["Ingredient"] = [
-        {"name": name, "count": n, "url": url_for("dictionary", ingredient=name.lower())}
-        for name, n in ingredient_counts.most_common(6)]
-    common_tags = [(g, grouped[g][:6]) for g in COMMON_TAG_GROUPS if grouped.get(g)]
-
-    # Countries with the most similar dishes (best match per country), not the origin
-    # and not the country already shown
-    skip = {source_dish["country"].lower()} | (set() if target_any else {target_country.lower()})
-    best_per_country = {}
-    for idx in np.argsort(total_scores)[::-1]:
-        recipe = RECIPES[int(idx)]
-        key = recipe["country"].lower()
-        if int(idx) == source_idx or key in skip or key in best_per_country:
-            continue
-        best_per_country[key] = int(idx)
-        if len(best_per_country) == 3:
-            break
-    similar_countries = []
-    for key, idx in best_per_country.items():
-        params = dict(link_params, target_country=key)
-        params.pop("ingredients", None)   # the ingredient filter belongs to the first country
-        similar_countries.append({
-            "country": RECIPES[idx]["country"],
-            "label": STORE.label_of(RECIPES[idx]["country"]),
-            "dish": (RECIPES[idx].get("title") or "").strip(),
-            "image_link": RECIPES[idx].get("image_link") or "",
-            "score": round(float(total_scores[idx]) * 100),
-            "url": url_for("similar_dishes", **params),
-        })
-
-    # Map: how many listed dishes each country has, and its best one
-    map_countries = {}
-    for r in results:
-        entry = map_countries.setdefault(r["country"], {
-            "country": r["country"], "label": r["country_label"], "count": 0,
-            "best": r["title"], "score": r["score"]})
+    countries = {}
+    for d in dishes:
+        entry = countries.setdefault(d["country"], {
+            "country": d["country"], "label": d["label"], "count": 0, "best": d["title"], "score": d["score"]})
         entry["count"] += 1
-
-    source_card = dish_card(source_idx)
-    source_ings = set(parse_items(RECIPES[source_idx].get("ingredient_text", "")))
-    source_card["recipe_link"] = source_dish.get("recipe_link", "")
-    source_card["region"] = source_dish.get("country_region") or STORE.region_of(source_dish["country"])
-
-    connection = cultural_info.country_connection(
-        RECIPES,
-        source_dish["country"],
-        None if target_any else target_country.upper(),
-        STORE.label_of,
-        STORE.region_of,
-        parse_items,
-        dish_title=source_card["title"],
-    )
-
-    return render_template(
-        "overview.html",
-        source=source_card,
-        results=results,
-        total=len(ordered_targets),
-        target_any=target_any,
-        target_label="Any country" if target_any else STORE.label_of(target_country.upper()),
-        country_filters=country_counts.most_common(),
-        tag_filters=[t for t, _ in tag_counts.most_common(8)],
-        common_tags=common_tags,
-        similar_countries=similar_countries,
-        map_data={
-            "origin": source_dish["country"],
-            "target": None if target_any else target_country.upper(),
-            "countries": list(map_countries.values()),
-            # Full-screen map: a pin per dish, and what its side panel shows
-            "source": {
-                "idx": source_idx, "title": source_card["title"],
-                "alt": source_card["alternative_title"], "country": source_dish["country"],
-                "label": source_card["country_label"], "image": source_card["image_link"],
-                "tags": source_card["tags"],
-                "recipe": format_recipe_url(source_card.get("recipe_link", "")),
-                "ingredients": sorted(source_ings),
-            },
-            "dishes": [map_dish(r, source_ings) for r in results],
-        },
-        connection=connection,
-        ingredient_note=ingredient_note,
-        search_url=url_for("home") + "#search-section",
-    )
-
-
-def map_dish(card, source_ings):
-    """One pin on the results map: the dish, its rank/score and its ingredients compared
-    with the searched dish (shared / only in the searched dish / only in this dish)."""
-    ings = set(parse_items(RECIPES[card["idx"]].get("ingredient_text", "")))
+    source = dish_card(source_idx)
     return {
-        "idx": card["idx"], "rank": card["rank"], "score": card["score"],
-        "title": card["title"], "alt": card["alternative_title"],
-        "country": card["country"], "label": card["country_label"],
-        "image": card["image_link"], "tags": card["tags"], "url": card["url"],
-        "recipe": format_recipe_url(RECIPES[card["idx"]].get("recipe_link", "")),
-        "ingredients": {
-            "shared": sorted(ings & source_ings),
-            "source_unique": sorted(source_ings - ings),
-            "target_unique": sorted(ings - source_ings),
-        },
+        "origin": RECIPES[source_idx]["country"],
+        "target": None if target_any else STORE.label_of(target_country.upper()),
+        "countries": list(countries.values()),
+        "source": {"idx": source_idx, "title": source["title"], "country": source["country"],
+                   "label": source["country_label"], "image": source["image_link"]},
+        "dishes": dishes,
+        "listSize": MAP_LIST_SIZE,
     }
 
 
 def _search_args():
-    """The search fields of the overview/compare links."""
+    """The search fields of the compare links."""
     a = request.args
     return dict(
         dish_name=a.get("dish_name", "").strip(),
@@ -1009,42 +912,14 @@ def _search_args():
 
 @app.route("/similar-dishes")
 def similar_dishes():
-    """Overview: the list of similar dishes for a search (opened after every search)."""
+    """Old overview links (the overview page was removed): open the best match's comparison."""
     return get_search_results(force=True, show_overview=True, **_search_args())
 
 
 @app.route("/compare")
 def compare():
-    """Detailed comparison with the dish picked on the overview page."""
+    """Comparison of the searched dish with one similar dish (pick = its index)."""
     return get_search_results(force=True, pick=request.args.get("pick"), **_search_args())
-
-
-@app.route("/api/explain-pin")
-def explain_pin():
-    """GPT explanation for one dish on the map. The scores are recomputed here
-    so the browser can't change what gets sent to GPT.
-    """
-    try:
-        source_idx = int(request.args.get("source", ""))
-        idx = int(request.args.get("idx", ""))
-    except ValueError:
-        return jsonify({"error": "source and idx must be integers"}), 400
-    if not (0 <= source_idx < len(RECIPES) and 0 <= idx < len(RECIPES)) or source_idx == idx:
-        return jsonify({"error": "invalid recipe index"}), 400
-
-    per_feature = feature_scores_for_source(source_idx)
-    score = round(float(blend_scores(per_feature)[idx]) * 100, 2)
-    _, influence, clean_sims = shapley_for(per_feature, idx)
-
-    source_dish, dish = RECIPES[source_idx], RECIPES[idx]
-    evidence = build_evidence(source_dish, dish, score, influence)
-    explanation, explanation_source = get_explanation(evidence)
-    return jsonify({
-        "idx": idx,
-        "explanation": explanation,
-        "source": explanation_source,  # "ai" or "template"
-        "featureScores": {k: round(v, 4) for k, v in clean_sims.items()},
-    })
 
 
 @app.errorhandler(413)

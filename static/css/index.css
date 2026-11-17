@@ -1148,3 +1148,239 @@ hr {
 /* Dish names on cards */
 .selected-dish-card strong,
 .dish-picker-info strong { color: var(--maroon-main); }
+
+/* ==========================================================================
+   COUNTRY PICKER POPUP: map on the left, country list (with "Any country") on the right.
+   Opens after a dish is chosen (country-picker.js).
+   ========================================================================== */
+body.cp-open { overflow: hidden; }
+.cp-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: rgba(20, 4, 4, 0.72);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+.cp-overlay[hidden] { display: none; }
+.cp-overlay.is-open { opacity: 1; }
+.cp-dialog {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  width: min(1100px, 100%);
+  height: min(660px, 100%);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--pill-bg);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  transform: translateY(10px);
+  transition: transform 0.2s ease;
+}
+.cp-overlay.is-open .cp-dialog { transform: none; }
+.cp-dialog:focus { outline: none; }
+.cp-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--maroon-dark);
+  color: #ffffff;
+  cursor: pointer;
+}
+.cp-close:hover { background: var(--maroon-light); }
+.cp-close:focus-visible { outline: 2px solid var(--gold-accent); outline-offset: 2px; }
+
+/* ---------- map ---------- */
+.cp-stage { position: relative; min-height: 0; background: #5c0a0e; }
+.cp-map { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; }
+.cp-map:active { cursor: grabbing; }
+.cp-svg { display: block; width: 100%; height: 100%; }
+.cp-svg path { transition: fill 0.15s ease; }
+.cp-svg path.is-pickable { cursor: pointer; }
+.cp-svg path.is-pickable:hover { filter: brightness(0.9); }
+.cp-map.is-offline::after {
+  content: 'Map unavailable offline. Choose a country from the list.';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--text-sub);
+}
+.cp-tooltip {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  gap: 1px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: var(--maroon-dark);
+  border: 1px solid rgba(220, 179, 73, 0.3);
+  color: #ffffff;
+  font-size: 0.7rem;
+  pointer-events: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+.cp-tooltip strong { color: var(--gold-accent); font-size: 0.78rem; }
+.cp-tooltip[hidden] { display: none; }
+.cp-zoom { position: absolute; right: 14px; bottom: 14px; z-index: 4; display: flex; gap: 6px; }
+.cp-zoom button {
+  display: grid;
+  place-items: center;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--gold-accent);
+  color: #1a1a1a;
+  font: inherit;
+  font-size: 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.cp-zoom .cp-zoom-reset { font-size: 0.7rem; letter-spacing: 0.02em; }
+.cp-zoom button:hover { background: #c79f37; }
+.cp-zoom button:focus-visible { outline: 2px solid #ffffff; outline-offset: 2px; }
+.cp-legend {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(60, 6, 9, 0.85);
+  color: #ffffff;
+  font-size: 0.7rem;
+}
+.cp-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.cp-legend .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.cp-legend .sw-origin { background: #dcb349; }
+.cp-legend .sw-pick { background: #f2bfa8; }
+.cp-legend .sw-selected { background: #b52a24; box-shadow: 0 0 0 1px #ffffff inset; }
+
+/* ---------- list ---------- */
+.cp-side { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--gold-border); }
+.cp-head { padding: 22px 56px 12px 20px; }
+.cp-title {
+  margin: 0;
+  font-family: 'Playfair Display', serif;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--maroon-main);
+}
+.cp-dish { margin: 6px 0 0; font-size: 0.84rem; line-height: 1.5; color: var(--text-muted); }
+.cp-dish strong { font-family: 'Playfair Display', serif; font-size: 0.98rem; color: var(--maroon-main); }
+.cp-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 20px 8px;
+  padding: 0 12px;
+  border: 1px solid var(--gold-border);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--text-muted);
+}
+.cp-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 0.84rem;
+  color: var(--text-dark);
+}
+.cp-search input:focus { outline: none; }
+.cp-search:focus-within { border-color: var(--maroon-main); }
+.cp-list { flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: 0 12px 8px; list-style: none; }
+.cp-empty { padding: 14px 8px; font-size: 0.8rem; color: var(--text-muted); }
+.cp-option {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  color: var(--text-dark);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.cp-option:hover { background: var(--input-bg); }
+.cp-option:focus-visible { outline: 2px solid var(--gold-accent); outline-offset: 1px; }
+.cp-option-name { font-size: 0.9rem; font-weight: 600; }
+.cp-option-meta { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+.cp-option.is-origin .cp-option-name::after {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 6px;
+  border-radius: 2px;
+  background: var(--gold-accent);
+  vertical-align: middle;
+}
+.cp-option.is-selected { background: var(--maroon-main); border-color: var(--maroon-main); color: #ffffff; }
+.cp-option.is-selected .cp-option-meta { color: var(--gold-light); }
+/* "Any country": its own row above the list */
+.cp-option--any {
+  display: grid;
+  gap: 2px;
+  width: auto;
+  margin: 0 20px;
+  padding: 12px 14px;
+  border: 1px solid var(--gold-border);
+  background: var(--pill-bg);
+}
+.cp-option--any .cp-option-meta { white-space: normal; }
+.cp-option--any:hover { background: var(--input-bg); }
+.cp-option--any.is-selected { background: var(--maroon-main); }
+.cp-footer { padding: 12px 20px 18px; border-top: 1px solid var(--gold-border); }
+.cp-go { width: 100%; }
+.cp-go:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ---------- phones: map on top, list under it ---------- */
+@media (max-width: 760px) {
+  .cp-overlay { padding: 0; align-items: stretch; }
+  .cp-dialog {
+    grid-template-columns: 1fr;
+    grid-template-rows: 38vh minmax(0, 1fr);
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+  }
+  .cp-side { border-left: 0; border-top: 1px solid var(--gold-border); }
+  .cp-head { padding: 14px 16px 6px; }
+  .cp-title { font-size: 1.05rem; }
+  .cp-option--any { margin: 0 16px; }
+  .cp-search { margin: 8px 16px 6px; }
+  .cp-footer { padding: 10px 16px calc(14px + env(safe-area-inset-bottom, 0px)); }
+  .cp-close { top: calc(10px + env(safe-area-inset-top, 0px)); right: 10px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); }
+  .cp-zoom { top: 10px; left: 10px; right: auto; bottom: auto; }
+  .cp-legend { left: 10px; bottom: 10px; font-size: 0.62rem; gap: 4px 10px; padding: 6px 8px; }
+}
