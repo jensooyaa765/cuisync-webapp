@@ -17,6 +17,7 @@ The functions keep the names the app already used with SQLite (authenticate, get
 User ids are now Supabase UUIDs (text) instead of numbers.
 """
 import datetime
+import json
 import os
 import re
 
@@ -405,3 +406,47 @@ def recent_searches(limit=8):
         entry["user_name"] = who.get("name") or entry["username"]
         out.append(entry)
     return out
+
+
+# ---------------- recent searches (opened comparisons, ui-overhaul) ----------------
+# Stored in the Supabase table recent_comparisons (see supabase_setup.sql, step 6).
+RECENT_MAX = 100   # kept per user
+
+
+def add_recent(user_id, pair_key, entry):
+    """Save an opened comparison. The same pair moves back to the top instead of repeating."""
+    if not _valid_id(user_id):
+        return
+    _rest("DELETE", "recent_comparisons", params={"user_id": f"eq.{user_id}", "pair_key": f"eq.{pair_key}"})
+    _rest("POST", "recent_comparisons", json={"user_id": user_id, "pair_key": pair_key, "data": entry},
+          prefer="return=minimal")
+    # Keep only the newest RECENT_MAX per user
+    old = _rest("GET", "recent_comparisons", params={"user_id": f"eq.{user_id}", "select": "id",
+                                                     "order": "id.desc", "offset": str(RECENT_MAX)}).json()
+    if old:
+        ids = ",".join(str(r["id"]) for r in old)
+        _rest("DELETE", "recent_comparisons", params={"user_id": f"eq.{user_id}", "id": f"in.({ids})"})
+
+
+def list_recent(user_id):
+    if not _valid_id(user_id):
+        return []
+    rows = _rest("GET", "recent_comparisons", params={"user_id": f"eq.{user_id}", "select": "data",
+                                                      "order": "id.desc", "limit": str(RECENT_MAX)}).json()
+    out = []
+    for row in rows:
+        data = row.get("data")
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except ValueError:
+                continue
+        if isinstance(data, dict):
+            out.append(data)
+    return out
+
+
+def clear_recent(user_id):
+    if not _valid_id(user_id):
+        return
+    _rest("DELETE", "recent_comparisons", params={"user_id": f"eq.{user_id}"})

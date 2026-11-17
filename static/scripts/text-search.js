@@ -1,27 +1,21 @@
 /* Text search on the home page (panel revisions).
-   - DISH / INGREDIENTS buttons switch what the search bar looks for
+   - Search by dish name only (the ingredient search is now a sub-tab of "Search by tag",
+     see tag-search.js)
    - The country of origin is filled in from the chosen dish, like the image search
-   - A vague dish name ("adobo") or a list of ingredients opens a popup with every
-     matching dish. The user picks one, then CuiSync compares it with the target country.
+   - A vague dish name ("adobo") opens a popup with every matching dish. The user picks
+     one, then CuiSync compares it with the target country.
+   - The popup is shared with the tag and image searches (window.CuiSyncPopup).
    Needs DISH_RECORDS / recordsForName() from index.html and showErrorModal(). */
 document.addEventListener('DOMContentLoaded', () => {
   const form = document.getElementById('text-search-form');
   if (!form) return;
 
-  const modeInput = document.getElementById('text-search-mode');
-  const modeButtons = form.querySelectorAll('.search-mode-btn');
-  const dishGroup = document.getElementById('dish-mode-group');
-  const ingredientGroup = document.getElementById('ingredient-mode-group');
   const dishInput = document.getElementById('dish-name-input');
   const dropdownList = document.getElementById('dish-dropdown-list');
   const recipeIdInput = document.getElementById('dish-recipe-id');
   const originSelect = document.getElementById('text-origin');
   const originDisplay = document.getElementById('text-origin-display');
   const targetSelect = document.getElementById('text-target');
-  const chipBox = document.getElementById('ingredient-chips');
-  const entry = document.getElementById('ingredient-entry');
-  const ingDropdown = document.getElementById('ingredient-dropdown-list');
-  let ingredientList = [];   // [name, dish count] from /api/ingredients
   const submitButton = form.querySelector('button[type="submit"]');
   const changeBtn = document.getElementById('dish-change-btn');
   const clearBtn = document.getElementById('dish-clear-btn');
@@ -44,11 +38,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // stop the popup from opening before a target country is chosen
   form.noValidate = true;
 
-  let mode = 'dish';
-  let chips = [];
+  const mode = 'dish';
   let lastResults = null;      // so "Click to change" can reopen the popup
   let submitAfterPick = false;
-  let suggestionsLoaded = false;
 
   // ---------------- country of origin ----------------
   function updateOriginDisplay() {
@@ -71,10 +63,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ---------------- chosen dish ----------------
-  // "FIND DISHES" until an ingredient search has a chosen dish, then "SEARCH THE DISH"
   function updateButton() {
-    const ready = mode === 'dish' || selectedCard.style.display !== 'none';
-    submitButton.textContent = ready ? 'SEARCH THE DISH' : 'FIND DISHES';
+    submitButton.textContent = 'SEARCH THE DISH';
   }
 
   function clearPick() {
@@ -136,39 +126,6 @@ document.addEventListener('DOMContentLoaded', () => {
     updateInputActions();
     dishInput.focus();
   });
-
-  // ---------------- DISH / INGREDIENTS ----------------
-  function setMode(next) {
-    mode = next === 'ingredients' ? 'ingredients' : 'dish';
-    modeInput.value = mode;
-    modeButtons.forEach((b) => {
-      const on = b.dataset.mode === mode;
-      b.classList.toggle('active', on);
-      b.setAttribute('aria-selected', String(on));
-    });
-    lastResults = null;
-    dishGroup.hidden = mode !== 'dish';
-    ingredientGroup.hidden = mode !== 'ingredients';
-    // Ingredient search has no country of origin box (it comes from the picked dish),
-    // so the target country takes the full row
-    document.getElementById('text-origin-group').hidden = mode === 'ingredients';
-    document.getElementById('text-target-group').classList.toggle('full-row', mode === 'ingredients');
-    dishInput.required = mode === 'dish';
-    hideDropdown();
-    clearPick();
-    if (mode === 'dish') {
-      dishInput.value = '';
-    } else {
-      dishInput.value = '';
-      loadSuggestions();
-    }
-    updateButton();
-    updateInputActions();
-  }
-  modeButtons.forEach((b) => b.addEventListener('click', () => {
-    if (b.dataset.mode !== mode) setMode(b.dataset.mode);
-    (mode === 'dish' ? dishInput : entry).focus();
-  }));
 
   // ---------------- dish name autocomplete ----------------
   let activeIndex = -1;
@@ -280,145 +237,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.target !== dishInput && !dropdownList.contains(e.target)) hideDropdown();
   });
 
-  // ---------------- ingredient chips ----------------
-  function renderChips() {
-    chipBox.replaceChildren(...chips.map((c, i) => {
-      const chip = document.createElement('span');
-      chip.className = 'ingredient-chip';
-      chip.textContent = c;
-      const x = document.createElement('button');
-      x.type = 'button';
-      x.textContent = '×';
-      x.setAttribute('aria-label', 'Remove ' + c);
-      x.addEventListener('click', () => {
-        chips.splice(i, 1);
-        renderChips();
-        clearPick();
-        entry.focus();
-      });
-      chip.appendChild(x);
-      return chip;
-    }));
-  }
-
-  function addChips() {
-    const added = entry.value.split(',').map((s) => s.trim()).filter(Boolean);
-    added.forEach((v) => {
-      if (!chips.some((c) => c.toLowerCase() === v.toLowerCase())) chips.push(v);
-    });
-    entry.value = '';
-    if (added.length) {
-      clearPick();
-      renderChips();
-    }
-  }
-
-  // ---- ingredient dropdown (same look and keys as the dish name dropdown) ----
-  let ingActive = -1;
-  let ingMatches = [];
-
-  function hideIngDropdown() {
-    ingDropdown.classList.add('hidden');
-    ingDropdown.innerHTML = '';
-    ingActive = -1;
-  }
-
-  // Order: exact, starts with, a word starts with, contains. Already added ones are skipped.
-  function ingredientMatches(query, limit = 8) {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    const taken = new Set(chips.map((c) => c.toLowerCase()));
-    const rows = [];
-    for (const [name, count] of ingredientList) {
-      if (taken.has(name)) continue;
-      const rank = name === q ? 0 : name.startsWith(q) ? 1
-        : name.split(' ').some((w) => w.startsWith(q)) ? 2 : name.includes(q) ? 3 : -1;
-      if (rank >= 0) rows.push({ name, count, rank });
-    }
-    return rows.sort((a, b) => a.rank - b.rank || b.count - a.count).slice(0, limit);
-  }
-
-  function renderIngDropdown() {
-    ingMatches = ingredientMatches(entry.value);
-    ingDropdown.innerHTML = '';
-    ingActive = -1;
-    if (!ingMatches.length) return hideIngDropdown();
-    ingMatches.forEach((m) => {
-      const li = document.createElement('li');
-      li.className = 'dropdown-item';
-      li.appendChild(document.createTextNode(m.name));
-      const hint = document.createElement('span');
-      hint.className = 'dropdown-alt';
-      hint.textContent = `used in ${m.count} dish${m.count === 1 ? '' : 'es'}`;
-      if (m.count) li.appendChild(hint);
-      li.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        pickIngredient(m.name);
-      });
-      ingDropdown.appendChild(li);
-    });
-    ingDropdown.classList.remove('hidden');
-  }
-
-  function pickIngredient(name) {
-    entry.value = name;
-    addChips();
-    hideIngDropdown();
-    entry.focus();
-  }
-
-  entry.addEventListener('input', renderIngDropdown);
-  entry.addEventListener('focus', () => { if (entry.value.trim()) renderIngDropdown(); });
-  document.addEventListener('click', (e) => {
-    if (!ingDropdown.contains(e.target) && !document.getElementById('ingredient-chip-input').contains(e.target)) {
-      hideIngDropdown();
-    }
-  });
-
-  entry.addEventListener('keydown', (e) => {
-    const items = ingDropdown.querySelectorAll('.dropdown-item');
-    const open = !ingDropdown.classList.contains('hidden') && items.length;
-    if (open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-      e.preventDefault();
-      ingActive = e.key === 'ArrowDown'
-        ? (ingActive + 1) % items.length
-        : (ingActive - 1 + items.length) % items.length;
-      items.forEach((item, i) => item.classList.toggle('highlighted', i === ingActive));
-      items[ingActive].scrollIntoView({ block: 'nearest' });
-      return;
-    }
-    if (open && e.key === 'Enter' && ingActive >= 0) {
-      e.preventDefault();
-      pickIngredient(ingMatches[ingActive].name);
-      return;
-    }
-    if (open && e.key === 'Escape') {
-      hideIngDropdown();
-      return;
-    }
-    if (e.key === 'Enter' || e.key === ',') {
-      hideIngDropdown();
-      e.preventDefault();
-      if (entry.value.trim()) addChips();
-      else if (e.key === 'Enter') form.requestSubmit();
-    } else if (e.key === 'Backspace' && !entry.value && chips.length) {
-      chips.pop();
-      renderChips();
-      clearPick();
-    }
-  });
-  document.getElementById('ingredient-chip-input').addEventListener('click', () => entry.focus());
-
-  function loadSuggestions() {
-    if (suggestionsLoaded) return;
-    suggestionsLoaded = true;
-    fetch('/api/ingredients')
-      .then((r) => r.json())
-      // Works with both ["garlic", ...] (older server) and [["garlic", 120], ...]
-      .then((list) => { ingredientList = list.map((x) => (Array.isArray(x) ? x : [x, 0])); })
-      .catch(() => { suggestionsLoaded = false; });
-  }
-
   // ---------------- popup ----------------
   const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -470,10 +288,17 @@ document.addEventListener('DOMContentLoaded', () => {
       popupTitle.textContent = 'Choose a Dish from the Menu';
       popupDesc.textContent = `We found ${n} dishes in the image. Select the one you want to compare.`;
     } else if (data.mode === 'tags') {
+      const parts = [];
+      if (data.tags && data.tags.length) parts.push(`tagged ${data.tags.join(' + ')}`);
+      if (data.ingredients && data.ingredients.length) parts.push(`using ${data.ingredients.join(', ')}`);
+      if (data.countries && data.countries.length) parts.push(`from ${data.countries.join(' or ')}`);
       popupTitle.textContent = `${n} Dish${n === 1 ? '' : 'es'} Found`;
-      popupDesc.textContent = `Dishes tagged ${data.tags.join(' + ')}`
+      popupDesc.textContent = `Dishes ${parts.join(' and ')}`
         + (n > data.dishes.length ? ` (showing the first ${data.dishes.length})` : '')
-        + '. Select the one you want to compare.';
+        + '. '
+        + (data.ingredients && data.ingredients.length ? 'Dishes that use more of your ingredients come first. ' : '')
+        + 'Select the one you want to compare.'
+        + (data.unknown && data.unknown.length ? ` Not in our ingredient list: ${data.unknown.join(', ')}.` : '');
     } else if (data.mode === 'ingredients' && data.country) {
       popupTitle.textContent = `${n} ${data.country_label} Dish${n === 1 ? '' : 'es'} Use Your Ingredients`;
       popupDesc.textContent = `Only dishes from ${data.country_label} are shown because it is your target country. `
@@ -515,8 +340,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function choose(d) {
     const wantSubmit = submitAfterPick;
     closePopup();
-    // Dish mode: the name goes in the search bar (with "Click to change"), no preview card
-    pickDish(d, mode === 'ingredients');
+    // The name goes in the search bar (with "Click to change"), no preview card
+    pickDish(d, false);
     updateInputActions();
     if (!targetSelect.value) {
       targetSelect.classList.add('needs-attention');
@@ -533,37 +358,23 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   selectedCard.addEventListener('click', () => {
     if (lastResults && lastResults.dishes.length > 1) showPopup(lastResults);
-    else (mode === 'dish' ? dishInput : entry).focus();
+    else dishInput.focus();
   });
   targetSelect.addEventListener('change', () => {
     targetSelect.classList.remove('needs-attention');
-    // Ingredient search: a dish picked for another country no longer fits the new target,
-    // so the next search shows the new country's dishes
-    const country = targetCountry();
-    if (mode === 'ingredients' && country && originSelect.value && originSelect.value !== country) {
-      clearPick();
-      lastResults = null;
-    }
   });
 
   // The tag tab (tag-search.js) uses the same popup
   window.CuiSyncPopup = { show: showPopup, close: closePopup };
 
   // ---------------- search ----------------
-  // A specific target country (not "Any") limits the ingredient search to that country
-  function targetCountry() {
-    const v = targetSelect.value;
-    return v && v !== 'any' ? v : '';
-  }
-
   async function findDishes(searchMode, q) {
     submitButton.disabled = true;
     const label = submitButton.textContent;
     submitButton.textContent = 'SEARCHING\u2026';
     try {
-      const country = searchMode === 'ingredients' ? targetCountry() : '';
-      const r = await fetch(`/api/find-dishes?mode=${searchMode}&q=${encodeURIComponent(q)}`
-        + (country ? `&country=${encodeURIComponent(country)}` : ''), { credentials: 'same-origin' });
+      const r = await fetch(`/api/find-dishes?mode=${searchMode}&q=${encodeURIComponent(q)}`,
+        { credentials: 'same-origin' });
       return await r.json();
     } finally {
       submitButton.disabled = false;
@@ -572,54 +383,34 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function sendForm() {
-    // dish_name is what the server compares; in ingredient mode it's the picked dish.
-    // The ingredients go along so a specific target country only uses dishes that have them.
-    document.getElementById('text-search-ingredients').value = mode === 'ingredients' ? chips.join(', ') : '';
     HTMLFormElement.prototype.submit.call(form);
   }
 
   async function runSearch(autoSubmit) {
     submitAfterPick = autoSubmit;
-    if (mode === 'dish') {
-      const q = dishInput.value.trim();
-      if (!q) {
-        showErrorModal('Enter a Dish', 'Type a dish name, for example Pho, Adobo or Ramen.');
-        return;
-      }
-      const data = await findDishes('dish', q);
-      if (!data.total) {
-        showErrorModal("We Can't Find Your Dish",
-          `"${q}" isn't in our recipe database yet. Please check the spelling or try a more general dish name.`);
-        return;
-      }
-      if (data.total === 1 && !data.close_spelling) {
-        choose(data.dishes[0]);
-        return;
-      }
-      showPopup(data);
-    } else {
-      addChips();
-      if (!chips.length) {
-        showErrorModal('Add Ingredients', 'Type at least one ingredient, then press Enter. Example: chicken, garlic, soy sauce.');
-        return;
-      }
-      const data = await findDishes('ingredients', chips.join(', '));
-      if (!data.total) {
-        const where = data.country ? ` from ${data.country_label}` : '';
-        showErrorModal('No Dishes Found',
-          `No dish${where} in our dataset uses these ingredients. Try fewer or more common ingredients`
-          + (where ? ', or choose "Any country".' : '.'));
-        return;
-      }
-      showPopup(data);
+    const q = dishInput.value.trim();
+    if (!q) {
+      showErrorModal('Enter a Dish', 'Type a dish name, for example Pho, Adobo or Ramen.');
+      return;
     }
+    const data = await findDishes('dish', q);
+    if (!data.total) {
+      showErrorModal("We Can't Find Your Dish",
+        `"${q}" isn't in our recipe database yet. Please check the spelling or try a more general dish name.`);
+      return;
+    }
+    if (data.total === 1 && !data.close_spelling) {
+      choose(data.dishes[0]);
+      return;
+    }
+    showPopup(data);
   }
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     hideDropdown();
     // A dish is already chosen: go straight to the comparison
-    if (hasPick() && (mode === 'dish' || selectedCard.style.display !== 'none')) {
+    if (hasPick()) {
       if (!targetSelect.value) {
         showErrorModal('Choose a Target Country',
           'Select the target country (or "Any country") to compare the dish with.');
@@ -632,21 +423,12 @@ document.addEventListener('DOMContentLoaded', () => {
     runSearch(Boolean(targetSelect.value));
   });
 
-  // ---------------- open a past search: /?mode=ingredients&q=... ----------------
+  // ---------------- open a past search: /?mode=dish&q=... ----------------
+  // (/?mode=ingredients&q=... is handled by tag-search.js, in the Ingredient sub-tab)
   const params = new URLSearchParams(window.location.search);
-  const startMode = params.get('mode');
-  const startQuery = params.get('q');
-  if (startMode === 'ingredients' || startMode === 'dish') {
-    setMode(startMode);
-    if (startQuery) {
-      if (startMode === 'ingredients') {
-        chips = startQuery.split(',').map((s) => s.trim()).filter(Boolean);
-        renderChips();
-      } else {
-        dishInput.value = startQuery;
-      }
-      runSearch(false);
-    }
+  if (params.get('mode') === 'dish' && params.get('q')) {
+    dishInput.value = params.get('q');
+    runSearch(false);
   }
   updateOriginDisplay();
   updateInputActions();

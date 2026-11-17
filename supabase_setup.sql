@@ -126,5 +126,17 @@ GRANT EXECUTE ON FUNCTION public.cuisync_search_counts()            TO service_r
 GRANT EXECUTE ON FUNCTION public.cuisync_top_dishes(INT)            TO service_role;
 GRANT EXECUTE ON FUNCTION public.cuisync_searches_per_day(INT, TEXT) TO service_role;
 
+-- 6. Recent searches (opened comparisons, home page row + "All recent searches") -----
+CREATE TABLE IF NOT EXISTS public.recent_comparisons (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id     UUID        NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    pair_key    TEXT        NOT NULL,
+    data        JSONB       NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS recent_comparisons_user_idx ON public.recent_comparisons (user_id, id DESC);
+-- Only the server (service role) reads and writes it
+ALTER TABLE public.recent_comparisons ENABLE ROW LEVEL SECURITY;
+
 -- Tell the API about the new columns / table / functions right away
 NOTIFY pgrst, 'reload schema';
