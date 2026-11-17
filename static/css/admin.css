@@ -550,3 +550,8 @@ code { font-family: ui-monospace, Menlo, monospace; font-size: 0.85em; }
 /* Admin log in without the pills: logo at the top, text centred in the remaining space */
 .login-brand.no-pills { justify-content: flex-start; }
 .login-brand.no-pills .login-brand-copy { margin: auto 0; }
+
+/* Admin log in: the CUISYNC logo goes back to the home page */
+a.admin-logo-link { text-decoration: none; cursor: pointer; transition: opacity 0.2s; }
+a.admin-logo-link:hover { opacity: 0.8; }
+a.admin-logo-link:focus-visible { outline: 2px solid var(--gold-accent); outline-offset: 4px; border-radius: 4px; }
