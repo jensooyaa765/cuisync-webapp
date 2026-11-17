@@ -14,7 +14,7 @@
 {% block heading %}{{ meta[1] }}{% endblock %}
 {% block lead %}{{ meta[2] }}{% endblock %}
 {% block actions %}
-  {% if tab == 'dishes' or tab == 'overview' %}
+  {% if tab == 'dishes' %}
     <a href="{{ url_for('admin_dish_form') }}" class="btn btn-maroon">{{ icon('plus', 18) }} Add dish</a>
   {% endif %}
 {% endblock %}
@@ -29,7 +29,7 @@
   <div class="kpi">
     <div class="kpi-top"><p class="kpi-label">Total dishes</p><span class="kpi-icon">{{ icon('dish') }}</span></div>
     <p class="kpi-value">{{ "{:,}".format(total) }}</p>
-    <p class="kpi-note">{{ 'Edited dataset (admin_data)' if store.uses_admin_data else 'Original recipes.json' }}</p>
+    <p class="kpi-note">{{ ('Edited dataset' ~ (' (Supabase)' if store.db else ' (admin_data)')) if store.uses_admin_data else 'Original recipes.json' }}</p>
   </div>
   <div class="kpi">
     <div class="kpi-top"><p class="kpi-label">Countries</p><span class="kpi-icon">{{ icon('globe') }}</span></div>
@@ -98,7 +98,6 @@
   <section class="card grow-1">
     <div class="card-head"><h2>Quick actions</h2></div>
     <div class="quick-grid">
-      <a href="{{ url_for('admin_dish_form') }}" class="quick">{{ icon('dish') }}Add dish</a>
       <a href="{{ url_for('admin_page', tab='countries') }}" class="quick">{{ icon('globe') }}Add country</a>
       <a href="{{ url_for('admin_page', tab='prompts') }}" class="quick">{{ icon('prompt') }}Edit prompts</a>
       <a href="{{ url_for('admin_page', tab='tags') }}" class="quick">{{ icon('tag') }}Manage tags</a>
@@ -156,7 +155,7 @@
       <label class="search-field">
         <span class="sr-only">Search users</span>
         {{ icon('search') }}
-        <input type="search" name="q" value="{{ q }}" placeholder="Search by name or username">
+        <input type="search" name="q" value="{{ q }}" placeholder="Search by name, username or email">
       </label>
       <label class="sr-only" for="f-role">Role</label>
       <select id="f-role" name="role" data-autosubmit>
@@ -170,7 +169,7 @@
     <div class="table-wrap">
       <table class="table table-compact">
         <thead>
-          <tr><th>User</th><th>Role</th><th>Joined</th><th>Searches</th><th class="right">Actions</th></tr>
+          <tr><th>User</th><th>Role</th><th>Status</th><th>Joined</th><th>Searches</th><th class="right">Actions</th></tr>
         </thead>
         <tbody>
           {% for u in users %}
@@ -181,7 +180,7 @@
                 <span class="avatar">{{ u.name[:2] | upper }}</span>
                 <div>
                   <p class="strong">{{ u.name }}{% if is_me %} <span class="muted small">(you)</span>{% endif %}</p>
-                  <p class="muted small">@{{ u.username }}{% if u.cooking_role %} · {{ u.cooking_role }}{% endif %}</p>
+                  <p class="muted small">@{{ u.username }}{% if u.email %} · {{ u.email }}{% endif %}</p>
                 </div>
               </div>
             </td>
@@ -192,6 +191,16 @@
                         data-confirm-value="admin" data-confirm-text="Give @{{ u.username }} full admin access?">
                   <option value="user" {{ 'selected' if u.role == 'user' }}>User</option>
                   <option value="admin" {{ 'selected' if u.role == 'admin' }}>Admin</option>
+                </select>
+              </form>
+            </td>
+            <td>
+              <form method="post" action="{{ url_for('admin_user_status', user_id=u.id) }}">
+                <label class="sr-only" for="status-{{ u.id }}">Status for @{{ u.username }}</label>
+                <select id="status-{{ u.id }}" name="status" class="select-sm{% if not u.is_active %} status-disabled{% endif %}" data-autosubmit {{ 'disabled' if is_me }}
+                        data-confirm-value="disabled" data-confirm-text="Disable @{{ u.username }}? They won't be able to log in.">
+                  <option value="active" {{ 'selected' if u.is_active }}>Active</option>
+                  <option value="disabled" {{ 'selected' if not u.is_active }}>Disabled</option>
                 </select>
               </form>
             </td>
@@ -209,7 +218,7 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="5" class="empty">No users match your search.</td></tr>
+          <tr><td colspan="6" class="empty">No users match your search.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -224,8 +233,10 @@
         <span class="avatar avatar-lg">{{ selected.name[:2] | upper }}</span>
         <p class="profile-name">{{ selected.name }}</p>
         <p class="muted">@{{ selected.username }}</p>
+        {% if selected.email %}<p class="muted small">{{ selected.email }}</p>{% endif %}
         <div class="pill-row">
           <span class="pill pill-{{ selected.role }}">{{ selected.role | capitalize }}</span>
+          {% if not selected.is_active %}<span class="pill pill-disabled">Disabled</span>{% endif %}
           {% if selected.cooking_role %}<span class="pill pill-hidden">{{ selected.cooking_role }}</span>{% endif %}
         </div>
       </div>
@@ -532,13 +543,13 @@
 
   <section class="card grow-1">
     <div class="card-head"><h2>Download &amp; reset</h2><span class="kpi-icon">{{ icon('download') }}</span></div>
-    <p class="hint card-hint">Now using: <strong>{{ 'the edited copy in admin_data/recipes.json' if store.uses_admin_data else 'the original recipes.json' }}</strong>.</p>
+    <p class="hint card-hint">Now using: <strong>{{ ('the edited dataset in Supabase' if store.db else 'the edited copy in admin_data/recipes.json') if store.uses_admin_data else 'the original recipes.json' }}</strong>.{% if store.db %} Saved in Supabase, so edits stay after a restart.{% endif %}</p>
     <div class="stack-sm">
       <a class="btn btn-outline btn-block" href="{{ url_for('admin_dataset_download', format='json') }}">{{ icon('download', 18) }} Download JSON</a>
       <a class="btn btn-outline btn-block" href="{{ url_for('admin_dataset_download', format='csv') }}">{{ icon('download', 18) }} Download CSV</a>
       <form method="post" action="{{ url_for('admin_dataset_reset') }}">
         <button type="submit" class="btn btn-outline btn-block btn-danger" {{ 'disabled' if not store.uses_admin_data }}
-                data-confirm="Go back to the original recipes.json? Your edited copy is kept as a .bak file.">{{ icon('reset', 18) }} Reset to original dataset</button>
+                data-confirm="{{ 'Go back to the original recipes.json? This replaces the dishes in Supabase. Download a copy first if you want to keep your edits.' if store.db else 'Go back to the original recipes.json? Your edited copy is kept as a .bak file.' }}">{{ icon('reset', 18) }} Reset to original dataset</button>
       </form>
     </div>
     <p class="hint mt">New dishes reuse the vectors of known items. Brand-new items borrow the closest known vector; run the vectorizer again for a full update.</p>

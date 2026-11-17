@@ -6,7 +6,8 @@ Holds everything the admin page can change without touching the original files:
   - the GPT prompts (similarity explanation and cultural information)
 
 The original recipes.json and the .npy files are never overwritten. Changes are saved
-in the admin_data/ folder, and the soft matcher is rebuilt from them:
+in Supabase (the dishes: table recipes, see supabase_dataset.sql and dataset_db.py; the
+countries and GPT prompts stay in admin_data/), or all in admin_data/ when Supabase is not set up. The soft matcher is rebuilt from them:
   - dishes that were not changed keep their original item lists and vectors
   - a new ingredient (or action, cookware, utensil) that is already in the vocabulary
     reuses its vector
@@ -21,6 +22,8 @@ import re
 import threading
 
 import numpy as np
+
+import dataset_db
 
 FEATURES = ("ingredients", "actions", "cookware", "utensils")
 TEXT_FIELD = {
@@ -49,14 +52,19 @@ REGION_CHOICES = ("East Asia", "Southeast Asia", "South Asia", "Central Asia", "
 
 
 def _split(text):
+    """Turn "Garlic, Soy sauce , " into ["garlic", "soy sauce"] (comma list -> clean lower-case items)."""
     return [t.strip().lower() for t in str(text or "").split(",") if t.strip()]
 
 
 def _dedupe(items):
+    """Remove repeated items but keep the first-seen order."""
     return list(dict.fromkeys(items))
 
 
 def _singular(word):
+    """Very small plural -> singular rule ("tomatoes" -> "tomato", "cherries" -> "cherry",
+    "onions" -> "onion"). Used only to find a known item with a slightly different spelling.
+    """
     if len(word) > 3 and word.endswith("es") and word[:-2].endswith(("sh", "ch", "o", "x")):
         return word[:-2]
     if len(word) > 3 and word.endswith("ies"):
@@ -67,11 +75,25 @@ def _singular(word):
 
 
 def _normal_item(item):
+    """Make every word of an item singular, so "green onions" and "green onion" compare equal."""
     return " ".join(_singular(w) for w in item.split())
 
 
 class DatasetStore:
+    """Everything the admin page can change, kept in memory while the app runs.
+
+    The app reads self.recipes / self.countries / self.prompts directly. Every change goes
+    through a method here, which updates memory and saves it (Supabase or admin_data/).
+    self.lock makes sure two admin requests never change the data at the same time.
+    """
+
     def __init__(self, root):
+        """Load the original files, then the current (possibly edited) dataset.
+
+        root = the folder with app.py, recipes.json and the .npy / *_items.json files.
+        self.base holds the original vectors per feature (read only). self.db is True when the
+        dishes are saved in Supabase, False when they are saved in admin_data/recipes.json.
+        """
         self.root = root
         self.data_dir = os.path.join(root, "admin_data")
         self.runtime_dir = os.path.join(self.data_dir, "matcher")
@@ -102,17 +124,75 @@ class DatasetStore:
         for r, recipe in enumerate(self.base_recipes):
             self.base_by_key[self._key(recipe)] = r
 
-        self.uses_admin_data = os.path.exists(self.recipes_path)
-        self.recipes = self._load_recipes()
+        self.missing_vectors = []
+        # Where admin changes are saved: Supabase if it is set up, else the admin_data/ folder
+        self.db = dataset_db.available()
+        if self.db:
+            try:
+                self._load_from_db()
+            except dataset_db.SupabaseError as error:
+                print(f"[CuiSync] Could not load the dataset from Supabase ({error}). "
+                      "Using the local files for now; admin edits are saved in admin_data/.")
+                self.db = False
+        if not self.db:
+            self.uses_admin_data = os.path.exists(self.recipes_path)
+            self.recipes = self._load_recipes()
+            self.countries = self._load_countries()
+            self.prompts = self._load_json(self.prompts_path, {})
+
+    # ---------------- Supabase ----------------
+    def _load_from_db(self):
+        """Read the dishes from Supabase (countries and prompts stay in admin_data/). On the very
+        first start the table is empty, so it is filled from this folder (admin_data/recipes.json
+        if the admin already edited the dataset, otherwise the original recipes.json)."""
+        recipes = dataset_db.load_recipes()
+        if not recipes:
+            recipes = self._load_recipes()
+            print(f"[CuiSync] Uploading {len(recipes)} dishes to Supabase (first start)...")
+            dataset_db.replace_all_recipes(recipes)
+            print("[CuiSync] Dataset uploaded to Supabase.")
+        for r in recipes:
+            r["country"] = (r.get("country") or "").strip().upper()
+        self.recipes = recipes
+        self._next_position = dataset_db.max_position() + 1
+        self.uses_admin_data = not self._same_as_base()
         self.countries = self._load_countries()
         self.prompts = self._load_json(self.prompts_path, {})
-        self.missing_vectors = []
+
+    def _same_as_base(self):
+        """True when the dataset is still the original one (same dishes, order and item lists),
+        so the original .npy files can be used as they are."""
+        if len(self.recipes) != len(self.base_recipes):
+            return False
+        fields = list(TEXT_FIELD.values())
+        for r, b in zip(self.recipes, self.base_recipes):
+            if self._key(r) != self._key(b) or any((r.get(f) or "") != (b.get(f) or "") for f in fields):
+                return False
+        return True
+
+    def _db_save(self, action):
+        """Run one Supabase save. If it fails, go back to what Supabase has and tell the admin."""
+        if not self.db:
+            return
+        try:
+            action()
+        except dataset_db.SupabaseError as error:
+            try:
+                self._load_from_db()
+            except dataset_db.SupabaseError:
+                pass
+            print(f"[CuiSync] Saving the dataset to Supabase failed: {error}")
+            raise ValueError("Could not save to Supabase, so nothing was changed. "
+                             "Check your internet connection and try again.")
 
     # ---------------- sharing with the admin app ----------------
     # The admin app (admin_app.py) runs as a separate program and saves its changes in
     # admin_data/. The public app compares data_version() before each request and calls
     # reload_from_disk() when the admin changed something.
     def data_version(self):
+        """A fingerprint of the saved files (their modification times). If it changes, another
+        program edited admin_data/ and the data should be reloaded. Only used in file mode.
+        """
         out = []
         for path in (self.recipes_path, self.countries_path, self.prompts_path):
             try:
@@ -122,7 +202,10 @@ class DatasetStore:
         return tuple(out)
 
     def reload_from_disk(self):
+        """Read the dataset again from where it is saved (Supabase or admin_data/)."""
         with self.lock:
+            if self.db:
+                return self._load_from_db()
             self.uses_admin_data = os.path.exists(self.recipes_path)
             self.recipes = self._load_recipes()
             self.countries = self._load_countries()
@@ -131,23 +214,33 @@ class DatasetStore:
     # ---------------- helpers ----------------
     @staticmethod
     def _key(recipe):
+        """Identity of a dish: (id, title, country). Used to find the original version of a dish
+        in recipes.json, so an unchanged dish can keep its original vectors.
+        """
         return (str(recipe.get("recipe_id")), (recipe.get("title") or "").strip().lower(),
                 (recipe.get("country") or "").strip().upper())
 
     @staticmethod
     def _load_json(path, default):
+        """Read a JSON file, or return default if the file does not exist."""
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
                 return json.load(f)
         return default
 
     def _save_json(self, path, data):
+        """Write a JSON file safely: write to a .tmp file first, then swap it in, so a crash
+        halfway never leaves a broken file.
+        """
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=1)
         os.replace(tmp, path)
 
     def _load_recipes(self):
+        """Dishes from admin_data/recipes.json if the admin edited them, else a copy of the
+        original recipes.json. Country names are always stored in upper case (e.g. "JAPAN").
+        """
         recipes = self._load_json(self.recipes_path, None)
         if recipes is None:
             recipes = [dict(r) for r in self.base_recipes]
@@ -156,6 +249,9 @@ class DatasetStore:
         return recipes
 
     def _load_countries(self):
+        """The country list for the dropdowns: admin_data/countries.json if the admin changed it,
+        else one entry per country found in the dishes, with the default label and region.
+        """
         saved = self._load_json(self.countries_path, None)
         if saved is not None:
             return saved
@@ -171,22 +267,41 @@ class DatasetStore:
         ]
 
     # ---------------- recipes ----------------
-    def save_recipes(self):
+    def save_recipes(self, changed=None):
+        """Save the dataset. changed = the dishes that were edited (Supabase saves only those);
+        None = save everything."""
         with self.lock:
-            self._save_json(self.recipes_path, self.recipes)
+            if self.db:
+                if changed is None:
+                    self._db_save(lambda: dataset_db.replace_all_recipes(self.recipes))
+                    self._next_position = len(self.recipes)
+                elif changed:
+                    self._db_save(lambda: dataset_db.update_recipes(changed))
+            else:
+                self._save_json(self.recipes_path, self.recipes)
             self.uses_admin_data = True
 
     def next_recipe_id(self):
+        """The id for a new dish: one more than the highest id in use."""
         ids = [int(r["recipe_id"]) for r in self.recipes if str(r.get("recipe_id", "")).isdigit()]
         return (max(ids) + 1) if ids else 1
 
     def find_index(self, recipe_id):
+        """Position of a dish in self.recipes by its recipe_id, or None if it is not there."""
         for i, r in enumerate(self.recipes):
             if str(r.get("recipe_id")) == str(recipe_id):
                 return i
         return None
 
     def clean_dish(self, form):
+        """Check and tidy the admin form (or an uploaded row) into a dish dict.
+
+        - trims every field; ingredient/action/cookware/utensil/tag lists become "a, b, c"
+          (one comma list, no repeats)
+        - country in upper case; title, country and at least one ingredient are required
+          (raises ValueError with a message the admin sees)
+        - fills the *_canon fields and country_region so the dish looks like the dataset ones
+        """
         dish = {}
         for field in DISH_FIELDS:
             value = (form.get(field) or "").strip()
@@ -209,33 +324,55 @@ class DatasetStore:
         return dish
 
     def add_dish(self, form):
+        """Add a new dish from the admin form. Saves it right away (one new row in Supabase,
+        placed last) and adds its country to the list if it is new. Returns the saved dish.
+        """
         with self.lock:
             dish = self.clean_dish(form)
             dish["recipe_id"] = self.next_recipe_id()
+            if self.db:
+                self._db_save(lambda: dataset_db.upsert_recipes([(dish, self._next_position)]))
+                self._next_position += 1
             self._ensure_country(dish["country"])
             self.recipes.append(dish)
-            self.save_recipes()
+            if not self.db:
+                self.save_recipes()
+            self.uses_admin_data = True
             return dish
 
     def update_dish(self, recipe_id, form):
+        """Save the admin's changes to one dish (only that row is sent to Supabase).
+        Raises ValueError if the dish does not exist or the form is not valid.
+        """
         with self.lock:
             idx = self.find_index(recipe_id)
             if idx is None:
                 raise ValueError("Dish not found.")
             dish = self.clean_dish(form)
             dish["recipe_id"] = self.recipes[idx]["recipe_id"]
+            if self.db:
+                updated = dict(self.recipes[idx], **dish)
+                self._db_save(lambda: dataset_db.update_recipes([updated]))
             self._ensure_country(dish["country"])
             self.recipes[idx].update(dish)
-            self.save_recipes()
+            if not self.db:
+                self.save_recipes()
+            self.uses_admin_data = True
             return self.recipes[idx]
 
     def delete_dish(self, recipe_id):
+        """Delete one dish (its row in Supabase, or from admin_data/recipes.json). Returns it."""
         with self.lock:
             idx = self.find_index(recipe_id)
             if idx is None:
                 raise ValueError("Dish not found.")
+            if self.db:
+                rid = self.recipes[idx]["recipe_id"]
+                self._db_save(lambda: dataset_db.delete_recipe(rid))
             removed = self.recipes.pop(idx)
-            self.save_recipes()
+            if not self.db:
+                self.save_recipes()
+            self.uses_admin_data = True
             return removed
 
     def import_dataset(self, records, mode="append"):
@@ -254,17 +391,43 @@ class DatasetStore:
                 cleaned.append(dish)
             if not cleaned:
                 raise ValueError("The uploaded file has no dishes.")
+            if self.db:
+                if mode == "replace":
+                    self._db_save(lambda: dataset_db.replace_all_recipes(cleaned))
+                    self._next_position = len(cleaned)
+                else:
+                    start = self._next_position
+                    self._db_save(lambda: dataset_db.upsert_recipes(
+                        [(d, start + i) for i, d in enumerate(cleaned)]))
+                    self._next_position += len(cleaned)
             if mode == "replace":
                 self.recipes = cleaned
             else:
                 self.recipes.extend(cleaned)
             for dish in cleaned:
                 self._ensure_country(dish["country"])
-            self.save_recipes()
+            if not self.db:
+                self.save_recipes()
+            self.uses_admin_data = True
             return len(cleaned)
 
     def reset_to_original(self):
+        """Go back to the original recipes.json: the dishes in Supabase are replaced by the
+        original 900, and the edited country list is kept as admin_data/countries.json.bak.
+        """
         with self.lock:
+            if self.db:
+                originals = [dict(r) for r in self.base_recipes]
+                self._db_save(lambda: dataset_db.replace_all_recipes(originals))
+                self.recipes = originals
+                for r in self.recipes:
+                    r["country"] = (r.get("country") or "").strip().upper()
+                self._next_position = len(self.recipes)
+                self.uses_admin_data = False
+                if os.path.exists(self.countries_path):
+                    os.replace(self.countries_path, self.countries_path + ".bak")
+                self.countries = self._load_countries()
+                return
             self.recipes = [dict(r) for r in self.base_recipes]
             for path in (self.recipes_path, self.countries_path):
                 if os.path.exists(path):
@@ -296,8 +459,12 @@ class DatasetStore:
         return self._change_tag((name or "").strip().lower(), None)
 
     def _change_tag(self, old_key, new_label):
+        """Shared code for rename_tag and delete_tag. new_label=None removes the tag.
+        Only the dishes that had the tag are saved. Returns how many dishes changed.
+        """
         with self.lock:
             changed = 0
+            edited = []
             for r in self.recipes:
                 tags = [t.strip() for t in str(r.get("tags") or "").split(",") if t.strip()]
                 if not any(t.lower() == old_key for t in tags):
@@ -308,32 +475,44 @@ class DatasetStore:
                         t = new_label  # None = delete
                     if t and t.lower() not in {o.lower() for o in out}:
                         out.append(t)
-                r["tags"] = ", ".join(out)
+                edited.append(dict(r, tags=", ".join(out)))
                 changed += 1
-            if changed:
-                self.save_recipes()
+            if edited:
+                if self.db:
+                    self._db_save(lambda: dataset_db.update_recipes(edited))
+                by_id = {e["recipe_id"]: e["tags"] for e in edited}
+                for r in self.recipes:
+                    if r["recipe_id"] in by_id:
+                        r["tags"] = by_id[r["recipe_id"]]
+                if not self.db:
+                    self.save_recipes()
             return changed
 
     # ---------------- countries ----------------
     def save_countries(self):
+        """Save the country list to admin_data/countries.json."""
         with self.lock:
             self._save_json(self.countries_path, self.countries)
 
     def country(self, name):
+        """The saved entry for a country name (any case), or None."""
         name = (name or "").strip().upper()
         return next((c for c in self.countries if c["name"] == name), None)
 
     def region_of(self, name):
+        """Region of a country ("JAPAN" -> "East Asia"), with a default for unknown countries."""
         c = self.country(name)
         if c:
             return c["region"]
         return DEFAULT_REGIONS.get((name or "").upper(), "Other Asia")
 
     def label_of(self, name):
+        """How a country is shown to users ("TURKIYE" -> "Turkey")."""
         c = self.country(name)
         return c["label"] if c else (name or "").title()
 
     def _ensure_country(self, name):
+        """Add a country to the list when a dish uses one that is not there yet."""
         if not self.country(name):
             self.countries.append({"name": name, "label": name.title(),
                                    "region": DEFAULT_REGIONS.get(name, "Other Asia"), "visible": True})
@@ -341,6 +520,7 @@ class DatasetStore:
             self.save_countries()
 
     def add_country(self, label, region):
+        """Add a country from the Countries page. It shows in the dropdowns once it has a dish."""
         label = (label or "").strip()
         if not label:
             raise ValueError("Enter a country name.")
@@ -368,13 +548,16 @@ class DatasetStore:
             c["visible"] = bool(visible)
             self.save_countries()
             if region_changed:
+                moved = []
                 for r in self.recipes:
                     if r["country"] == c["name"]:
                         r["country_region"] = c["region"]
-                self.save_recipes()
+                        moved.append(r)
+                self.save_recipes(changed=moved)
             return region_changed
 
     def remove_country(self, name):
+        """Remove a country, but only if no dish uses it (otherwise the admin is told to hide it)."""
         c = self.country(name)
         if not c:
             raise ValueError("Country not found.")
@@ -396,9 +579,11 @@ class DatasetStore:
 
     # ---------------- prompts ----------------
     def get_prompt(self, name, default):
+        """The GPT prompt the admin saved ('explanation' or 'cultural'), or the default."""
         return self.prompts.get(name) or default
 
     def set_prompt(self, name, text):
+        """Save a GPT prompt in admin_data/prompts.json. Empty text = go back to the default."""
         with self.lock:
             if text and text.strip():
                 self.prompts[name] = text.strip()

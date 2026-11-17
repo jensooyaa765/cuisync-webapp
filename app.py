@@ -173,12 +173,15 @@ else:
         app.secret_key = f.read().strip()
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
 
+# Accounts live in Supabase (accounts.py, supabase_setup.sql)
 accounts.init(STORE.data_dir)
-# First admin account. Change the password after the first login (Profile page).
+# First admin account, made in Supabase when there is no admin yet. Change the password at /admin/account.
 ADMIN_USERNAME = os.environ.get("CUISYNC_ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.environ.get("CUISYNC_ADMIN_PASSWORD", "cuisync-admin")
-if accounts.ensure_admin(ADMIN_USERNAME, ADMIN_PASSWORD):
-    print(f"[CuiSync] Admin account created: {ADMIN_USERNAME} / {ADMIN_PASSWORD} (change it at /admin/account)")
+ADMIN_EMAIL = os.environ.get("CUISYNC_ADMIN_EMAIL", "admin@cuisync.app")
+if accounts.ensure_admin(ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_EMAIL):
+    print(f"[CuiSync] Admin account created in Supabase: {ADMIN_USERNAME} ({ADMIN_EMAIL}) / {ADMIN_PASSWORD} "
+          "(change the password at /admin/account)")
 
 # GPT prompts the admin saved
 cuisync_prompts.set_system_prompt(STORE.get_prompt("explanation", ""))
@@ -206,7 +209,14 @@ def reload_data():
 def current_user():
     if "user" not in g:
         uid = session.get("user_id")
-        g.user = accounts.get_user(uid) if uid else None
+        try:
+            g.user = accounts.get_user(uid) if uid else None
+        except accounts.SupabaseError as error:  # Supabase unreachable: carry on logged out
+            app.logger.warning("Could not load the user: %s", error)
+            g.user = None
+            return g.user
+        if g.user is not None and not g.user["is_active"]:  # disabled by an admin
+            g.user = None
         if uid and g.user is None:
             session.pop("user_id", None)
     return g.user
@@ -226,10 +236,10 @@ def admin_required(view):
     @wraps(view)
     def wrapper(*args, **kwargs):
         user = current_user()
-        if not user:
-            return redirect(url_for("login", next=request.full_path))
-        if not user["is_admin"]:
-            abort(403)
+        if not user or not user["is_admin"]:  # admins have their own log in page
+            if user:
+                flash("That page is for admins. Sign in with an admin account.", "error")
+            return redirect(url_for("admin_login", next=request.full_path))
         return view(*args, **kwargs)
     return wrapper
 
@@ -1412,19 +1422,23 @@ def login():
     if request.method == "GET" and user and user["is_admin"]:
         return redirect(url_for("admin_page"))
     if request.method == "POST":
-        user = accounts.authenticate(request.form.get("username"), request.form.get("password"))
+        try:
+            user = accounts.authenticate(request.form.get("username"), request.form.get("password"))
+        except accounts.SupabaseError as error:
+            flash(str(error), "error")
+            return render_template("auth.html", mode="login", next=request.values.get("next", "")), 400
+        if user and user["is_admin"]:  # admins sign in on their own page
+            flash("Admin accounts sign in on the admin log in page.", "error")
+            return redirect(url_for("admin_login"))
         if user:
             session.clear()
             session["user_id"] = user["id"]
-            session.permanent = True
+            session.permanent = bool(request.form.get("remember"))  # "Keep me signed in"
             flash(f"Welcome back, {user['name']}!", "success")
-            if user["is_admin"]:  # admins only use the admin pages
-                nxt = request.form.get("next") or ""
-                return redirect(nxt if nxt.startswith("/admin") and not nxt.startswith("//") else url_for("admin_page"))
             nxt = request.form.get("next")
             return redirect(_safe_next(nxt) if nxt else url_for("home"))
-        flash("Wrong username or password.", "error")
-    return render_template("auth.html", mode="login", next=request.args.get("next", ""))
+        flash("Wrong email / username or password.", "error")
+    return render_template("auth.html", mode="login", next=request.values.get("next", ""))
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -1435,14 +1449,16 @@ def register():
         else:
             try:
                 uid = accounts.create_user(request.form.get("username"), request.form.get("password"),
-                                           display_name=request.form.get("display_name", ""))
+                                           display_name=request.form.get("display_name", ""),
+                                           email=request.form.get("email", ""))
                 session.clear()
                 session["user_id"] = uid
                 flash("Your account is ready. Set up your profile below.", "success")
                 return redirect(url_for("profile"))
             except ValueError as error:
                 flash(str(error), "error")
-    return render_template("auth.html", mode="register", next="")
+    return render_template("auth.html", mode="register", next="",
+                           form={k: request.form.get(k, "") for k in ("email", "username", "display_name")})
 
 
 @app.route("/logout")
@@ -1457,8 +1473,11 @@ def logout():
 def profile():
     user = current_user()
     if request.method == "POST":
-        accounts.update_profile(user["id"], request.form)
-        flash("Profile saved.", "success")
+        try:
+            accounts.update_profile(user["id"], request.form)
+            flash("Profile saved.", "success")
+        except accounts.SupabaseError as error:
+            flash(str(error), "error")
         return redirect(url_for("profile"))
     return render_template(
         "profile.html",
@@ -1787,13 +1806,20 @@ def admin_page():
         per_country = {}
         for r in RECIPES:
             per_country[r["country"]] = per_country.get(r["country"], 0) + 1
-        per_day = accounts.searches_per_day(7)
+        try:  # account numbers come from Supabase
+            per_day = accounts.searches_per_day(7)
+            stats, recent = accounts.history_stats(), accounts.recent_searches(6)
+        except accounts.SupabaseError as error:
+            flash(f"Account numbers are not available: {error} (Did you run supabase_setup.sql?)", "error")
+            import datetime as _dt
+            per_day = [(_dt.date.today() - _dt.timedelta(days=6 - i), 0) for i in range(7)]
+            stats, recent = {"total_searches": 0, "users": 0, "top_dishes": []}, []
         most = max([n for _, n in per_day] + [1])
-        ctx.update(stats=accounts.history_stats(), per_country=per_country, total=len(RECIPES),
+        ctx.update(stats=stats, per_country=per_country, total=len(RECIPES),
                    missing=STORE.missing_vectors, gpt_on=explainer._client is not None,
                    per_day=[{"label": d.strftime("%a"), "value": n, "height": round(100 * n / most)}
                             for d, n in per_day],
-                   recent=accounts.recent_searches(6), ner_status=ner.status(),
+                   recent=recent, ner_status=ner.status(),
                    visible_countries=len(STORE.dropdown_countries()))
     elif tab == "dishes":
         q = request.args.get("q", "").strip()
@@ -1824,15 +1850,17 @@ def admin_page():
     elif tab == "users":
         q = request.args.get("q", "").strip().lower()
         role = request.args.get("role", "")
-        users = [u for u in accounts.list_users()
-                 if (not q or q in f"{u['username']} {u['name']}".lower()) and (not role or u["role"] == role)]
-        selected = None
-        if (request.args.get("user") or "").isdigit():
-            selected = accounts.get_user(int(request.args["user"]))
-            if selected:
-                selected["history"] = accounts.get_history(selected["id"], limit=5)
-                selected["searches"] = next((u["searches"] for u in accounts.list_users()
-                                             if u["id"] == selected["id"]), 0)
+        try:
+            all_users = accounts.list_users()
+        except accounts.SupabaseError as error:
+            flash(f"Could not load the users: {error} (Did you run supabase_setup.sql?)", "error")
+            all_users = []
+        users = [u for u in all_users
+                 if (not q or q in f"{u['username']} {u['name']} {u.get('email') or ''}".lower())
+                 and (not role or u["role"] == role)]
+        selected = next((dict(u) for u in all_users if u["id"] == request.args.get("user")), None)
+        if selected:
+            selected["history"] = accounts.get_history(selected["id"], limit=5)
         ctx.update(users=users, me=current_user(), q=q, role=role, selected=selected)
     elif tab == "tags":
         groups, _ = search_tools.all_tags(RECIPES, STORE.region_of)
@@ -1849,17 +1877,37 @@ def admin_page():
     return render_template("admin/admin.html", **ctx)
 
 
-@app.route("/admin/login")
+@app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
-    """Old address: admins use the same log in page as everyone."""
-    return redirect(url_for("login", next=request.args.get("next", "")))
+    """Separate log in page for admins. Only accounts with role 'admin' get in."""
+    nxt = request.values.get("next", "")
+    user = current_user()
+    if request.method == "GET" and user and user["is_admin"]:
+        return redirect(url_for("admin_page"))
+    login_value = ""
+    if request.method == "POST":
+        login_value = (request.form.get("username") or "").strip()
+        try:
+            found = accounts.authenticate(login_value, request.form.get("password"))
+        except accounts.SupabaseError as error:
+            flash(str(error), "error")
+            return render_template("admin/admin_login.html", next=nxt, login_value=login_value), 400
+        if found and found["is_admin"]:
+            session.clear()
+            session["user_id"] = found["id"]
+            session.permanent = bool(request.form.get("remember"))
+            flash(f"Welcome back, {found['name']}!", "success")
+            ok = nxt.startswith("/admin") and not nxt.startswith("//") and not nxt.startswith("/admin/login")
+            return redirect(nxt if ok else url_for("admin_page"))
+        flash("This account is not an admin." if found else "Wrong email / username or password.", "error")
+    return render_template("admin/admin_login.html", next=nxt, login_value=login_value)
 
 
 @app.route("/admin/logout", methods=["POST"])
 def admin_logout():
     session.clear()
     flash("You are logged out.", "info")
-    return redirect(url_for("login"))
+    return redirect(url_for("admin_login"))
 
 
 @app.route("/admin/tags/rename", methods=["POST"])
@@ -1876,8 +1924,11 @@ def admin_tag_rename():
 @app.route("/admin/tags/delete", methods=["POST"])
 @admin_required
 def admin_tag_delete():
-    n = STORE.delete_tag(request.form.get("name"))
-    flash(f'Tag removed from {n} dish(es).', "success")
+    try:
+        n = STORE.delete_tag(request.form.get("name"))
+        flash(f'Tag removed from {n} dish(es).', "success")
+    except ValueError as error:
+        flash(str(error), "error")
     return redirect(url_for("admin_page", tab="tags"))
 
 
@@ -2034,9 +2085,15 @@ def admin_dataset_download():
 @app.route("/admin/dataset/reset", methods=["POST"])
 @admin_required
 def admin_dataset_reset():
-    STORE.reset_to_original()
+    try:
+        STORE.reset_to_original()
+    except ValueError as error:
+        flash(str(error), "error")
+        return redirect(url_for("admin_page", tab="dataset"))
     reload_data()
-    flash("The dataset is back to the original recipes.json (your edited copy was kept as a .bak file).", "success")
+    flash("The dataset is back to the original recipes.json." if STORE.db else
+          "The dataset is back to the original recipes.json (your edited copy was kept as a .bak file).",
+          "success")
     return redirect(url_for("admin_page", tab="dataset"))
 
 
@@ -2051,14 +2108,18 @@ def admin_prompts():
         text = ""
     if which == "cultural" and text.strip() == cultural_info.DEFAULT_PROMPT.strip():
         text = ""
-    STORE.set_prompt(which, text)
+    try:
+        STORE.set_prompt(which, text)
+    except ValueError as error:
+        flash(str(error), "error")
+        return redirect(url_for("admin_page", tab="prompts"))
     if which == "explanation":
         cuisync_prompts.set_system_prompt(text)
     flash("Prompt reset to the default." if not text else "Prompt saved. New searches use it right away.", "success")
     return redirect(url_for("admin_page", tab="prompts"))
 
 
-@app.route("/admin/users/<int:user_id>/role", methods=["POST"])
+@app.route("/admin/users/<user_id>/role", methods=["POST"])
 @admin_required
 def admin_user_role(user_id):
     try:
@@ -2069,7 +2130,21 @@ def admin_user_role(user_id):
     return redirect(url_for("admin_page", tab="users", user=user_id))
 
 
-@app.route("/admin/users/<int:user_id>/delete", methods=["POST"])
+@app.route("/admin/users/<user_id>/status", methods=["POST"])
+@admin_required
+def admin_user_status(user_id):
+    if user_id == current_user()["id"]:
+        flash("You can't disable your own account.", "error")
+    else:
+        try:
+            accounts.set_status(user_id, request.form.get("status"))
+            flash("Account " + ("disabled." if request.form.get("status") == "disabled" else "enabled."), "success")
+        except ValueError as error:
+            flash(str(error), "error")
+    return redirect(url_for("admin_page", tab="users", user=user_id))
+
+
+@app.route("/admin/users/<user_id>/delete", methods=["POST"])
 @admin_required
 def admin_user_delete(user_id):
     if user_id == current_user()["id"]:
