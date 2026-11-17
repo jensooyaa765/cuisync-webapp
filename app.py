@@ -251,7 +251,9 @@ app.jinja_env.filters["fromjson"] = lambda text: json.loads(text or "{}")
 def keep_admins_in_admin():
     """A logged-in admin only sees the admin pages: any page of the user site sends them to /admin."""
     path = request.path
-    if path.startswith(("/admin", "/static/", "/logout")) or path in ("/login", "/favicon.ico"):
+    # /sw.js (old PWA clean-up) must load for admins too
+    if path.startswith(("/admin", "/static/", "/logout")) or path in (
+            "/login", "/favicon.ico", "/sw.js"):
         return None
     user = current_user()
     if user and user["is_admin"]:
@@ -1462,21 +1464,30 @@ def api_find_dishes():
         # Dishes must have all the tags; with ingredients they are ranked by how many they use.
         tags = [t for t in q.split("|") if t]
         wanted = [w for w in split_names(request.args.get("ing", "")) if w]
-        # Countries of origin from the Region tab (a dish is from one country, so any of them)
+        # Countries of origin from the Region tab
         countries = {c.strip().lower() for c in request.args.get("country", "").split("|") if c.strip()}
+        # Region tab = places: regions and countries are "any of them" (OR), so
+        # South Korea + Southeast Asia -> every Korean dish and every Southeast Asian dish.
+        # The other tabs (cooking method, dish type) must all match (AND).
+        def region_of_recipe(r):
+            return r.get("country_region") or STORE.region_of(r.get("country"))
+        known_regions = {region_of_recipe(r) for r in RECIPES}
+        place_regions = {t for t in tags if t in known_regions}
+        other_tags = [t for t in tags if t not in place_regions]
         unknown, cuisines = [], []
         if wanted:
             results, unknown = INGREDIENT_SEARCH.search(RECIPES, wanted, "", limit=len(RECIPES))
-            if tags:
+            if other_tags:
                 results = [r for r in results
-                           if all(t in search_tools.recipe_tags(RECIPES[r[0]], STORE.region_of) for t in tags)]
-            cuisines = search_tools.possible_cuisines(RECIPES, results, STORE.label_of)
+                           if all(t in search_tools.recipe_tags(RECIPES[r[0]], STORE.region_of) for t in other_tags)]
         else:
-            results = search_tools.tag_search(RECIPES, tags, "", STORE.region_of)
-        if countries:
-            results = [r for r in results if RECIPES[r[0]]["country"].lower() in countries]
-            if wanted:
-                cuisines = search_tools.possible_cuisines(RECIPES, results, STORE.label_of)
+            results = search_tools.tag_search(RECIPES, other_tags, "", STORE.region_of)
+        if place_regions or countries:
+            results = [r for r in results
+                       if RECIPES[r[0]]["country"].lower() in countries
+                       or region_of_recipe(RECIPES[r[0]]) in place_regions]
+        if wanted:
+            cuisines = search_tools.possible_cuisines(RECIPES, results, STORE.label_of)
         saved = {"mode": "tags", "tag": tags}
         if wanted:
             saved["ing"] = ", ".join(wanted)
@@ -2106,28 +2117,28 @@ def forbidden(_error):
 
 
 
-# ---------------- PWA: installable app (manifest, service worker, offline page) ----------------
-from flask import send_from_directory as _send_from_directory
-
-PWA_DIR = os.path.join(app.root_path, "static", "pwa")
-
-
-@app.route("/manifest.webmanifest")
-def pwa_manifest():
-    return _send_from_directory(PWA_DIR, "manifest.webmanifest", mimetype="application/manifest+json")
+# ---------------- Old PWA clean-up ----------------
+# The site used to install a service worker. Phones and browsers that still have it ask for
+# /sw.js now and then: this one removes itself and its saved copies, then reloads the pages.
+OLD_SW_CLEANUP = """
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (event) => {
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((k) => k.startsWith('cuisync-')).map((k) => caches.delete(k)));
+    await self.registration.unregister();
+    const pages = await self.clients.matchAll({ type: 'window' });
+    pages.forEach((page) => page.navigate(page.url));
+  })());
+});
+"""
 
 
 @app.route("/sw.js")
-def pwa_service_worker():
-    # Served from the site root so it can work for every page. Never cached, so updates arrive.
-    response = _send_from_directory(PWA_DIR, "sw.js", mimetype="application/javascript")
+def old_service_worker_cleanup():
+    response = app.response_class(OLD_SW_CLEANUP, mimetype="application/javascript")
     response.headers["Cache-Control"] = "no-cache"
     return response
-
-
-@app.route("/offline")
-def pwa_offline():
-    return render_template("offline.html")
 
 
 if __name__ == "__main__":

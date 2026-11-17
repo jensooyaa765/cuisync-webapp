@@ -470,7 +470,6 @@ a {
   html.has-bottom-nav body { padding-bottom: calc(66px + env(safe-area-inset-bottom, 0px)); }
 
   /* The "Install CuiSync" bar sits above the bottom bar */
-  html.has-bottom-nav .pwa-install-chip { bottom: calc(78px + env(safe-area-inset-bottom, 0px)); }
 }
 
 
