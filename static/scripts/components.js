@@ -179,4 +179,53 @@ class AppFooter extends HTMLElement {
 }
 
 customElements.define('app-nav', AppNav);
-customElements.define('app-footer', AppFooter);
+customElements.define('app-footer', AppFooter);
+
+/* ==============================
+   REUSABLE INFO TOOLTIP
+============================== */
+
+document.addEventListener('click', (event) => {
+    const trigger = event.target.closest('.info-tooltip-trigger');
+
+    // Close tooltips when clicking outside
+    if (!trigger) {
+        document.querySelectorAll('.info-tooltip.is-open').forEach((tooltip) => {
+            if (!tooltip.contains(event.target)) {
+                tooltip.classList.remove('is-open');
+
+                const button = tooltip.querySelector('.info-tooltip-trigger');
+                button?.setAttribute('aria-expanded', 'false');
+            }
+        });
+
+        return;
+    }
+
+    const tooltip = trigger.closest('.info-tooltip');
+    const isOpen = tooltip.classList.contains('is-open');
+
+    // Close other open tooltips
+    document.querySelectorAll('.info-tooltip.is-open').forEach((item) => {
+        item.classList.remove('is-open');
+        item.querySelector('.info-tooltip-trigger')
+            ?.setAttribute('aria-expanded', 'false');
+    });
+
+    // Toggle selected tooltip
+    if (!isOpen) {
+        tooltip.classList.add('is-open');
+        trigger.setAttribute('aria-expanded', 'true');
+    }
+});
+
+// Close tooltips using Escape
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+        document.querySelectorAll('.info-tooltip.is-open').forEach((tooltip) => {
+            tooltip.classList.remove('is-open');
+            tooltip.querySelector('.info-tooltip-trigger')
+                ?.setAttribute('aria-expanded', 'false');
+        });
+    }
+});
