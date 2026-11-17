@@ -1,5 +1,5 @@
 import csv
-from collections import Counter
+from collections import Counter, defaultdict
 import difflib
 import io
 import json
@@ -1608,6 +1608,36 @@ def entity_matches(item, wanted):
     after = item[m.end():].split()
     return not (after and set(after) & search_tools.IngredientSearch.MADE_FROM)
 
+_ENTITY_OPTIONS = {}   # kind -> [[name, number of dishes, [dish ids]], ...] (built once)
+
+
+def dictionary_entity_options(dishes):
+    """Checklist options for the "Browse by category" dropdown: every ingredient, cooking action,
+    cookware and utensil in the dataset, with the dishes that have it (same matching rule as the
+    ?ingredient= links, so "pork" also finds "pork belly")."""
+    key = tuple(d["id"] for d in dishes)
+    if _ENTITY_OPTIONS.get("key") == key:
+        return _ENTITY_OPTIONS["value"]
+    out = {}
+    for kind, (field, label) in DICTIONARY_ENTITIES.items():
+        dishes_with = defaultdict(set)          # item as written -> dish ids
+        for d in dishes:
+            for item in parse_items(RECIPES[d["id"]].get(field, "")):
+                dishes_with[item.lower()].add(d["id"])
+        names = list(dishes_with)
+        options = []
+        for wanted in names:
+            ids = set()
+            for item in names:
+                if wanted in item and entity_matches(item, wanted):
+                    ids |= dishes_with[item]
+            options.append([wanted, len(ids), sorted(ids)])
+        options.sort(key=lambda o: (-o[1], o[0]))
+        out[kind] = {"label": label, "options": options}
+    _ENTITY_OPTIONS.update(key=key, value=out)
+    return out
+
+
 @app.route("/dictionary")
 def dictionary():
     """All dishes in the dataset. Clickable tags anywhere in the system link here
@@ -1650,6 +1680,7 @@ def dictionary():
         # [(allergen, number of dishes that HAVE it)] for the "Don't show" dropdown
         allergen_options=[(a, allergen_counts.get(a, 0)) for a in cultural_info.ALLERGENS],
         dishes=dishes,
+        entity_options=dictionary_entity_options(dishes),
         countries=[{**c, "count": counts[c["value"]]} for c in STORE.dropdown_countries()],
         tag_groups=tag_groups,
     )
@@ -2148,4 +2179,4 @@ if __name__ == "__main__":
     if not USE_RELOADER or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
         threading.Thread(target=ocr.warm_up, daemon=True).start()
 
-    app.run(host="127.0.0.1", port=8000, debug=False, use_reloader=USE_RELOADER)
+    app.run(host="127.0.0.1", port=8000, debug=False, use_reloader=USE_RELOADER)

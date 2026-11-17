@@ -11,6 +11,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const ENTITIES = JSON.parse((document.getElementById('dict-entities') || {}).textContent || '[]')
     .map(e => ({ ...e, ids: new Set(e.ids) }));
   const NO_IMAGE = window.DICT_NO_IMAGE;
+  // {ingredient: {label, options: [[name, count, [dish ids]], ...]}, action: ..., ...}
+  const ENTITY_OPTIONS = JSON.parse((document.getElementById('dict-entity-options') || {}).textContent || '{}');
 
   const grid = document.getElementById('dict-grid');
   const cardTpl = document.getElementById('dict-card-template');
@@ -38,10 +40,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const state = { q: '', countries: new Set(), tags: new Set(), xtags: new Set(), xallergens: new Set(),
                   entities: [], sort: 'az', page: 1 };
   const knownCountries = new Set(Array.from(document.querySelectorAll('input[name="country"]')).map(i => i.value));
-  const knownTags = new Set(Array.from(document.querySelectorAll('input[name="tag"]')).map(i => i.value));
+  // Tags come from the dishes (card tags and ?tag= links still filter the page)
+  const knownTags = new Set(DISHES.flatMap(d => d.g));
   const tagByLower = new Map(Array.from(knownTags).map(t => [t.toLowerCase(), t]));
-  const allergenByLower = new Map(Array.from(document.querySelectorAll('input[name="xallergen"]'))
-    .map(i => [i.value.toLowerCase(), i.value]));
+  // No "Hide" dropdown on the page any more, but links like ?xallergen=Peanuts
+  // (from the dish popup's allergen tags) still work: allergens come from the dishes
+  const allergenByLower = new Map(DISHES.flatMap(d => d.x || []).map(a => [a.toLowerCase(), a]));
 
   function readLink() {
     const p = new URLSearchParams(location.search);
@@ -52,7 +56,15 @@ document.addEventListener('DOMContentLoaded', () => {
     state.xtags = new Set(p.getAll('xtag').map(t => tagByLower.get(t.toLowerCase()))
       .filter(t => t && !state.tags.has(t)));
     state.xallergens = new Set(p.getAll('xallergen').map(a => allergenByLower.get(a.toLowerCase())).filter(Boolean));
-    state.entities = ENTITIES.filter(e => p.getAll(e.kind).some(v => v.trim().toLowerCase() === e.value));
+    state.entities = [];
+    ['ingredient', 'action', 'cookware', 'utensil'].forEach(kind => {
+      p.getAll(kind).forEach(v => {
+        const value = v.trim().toLowerCase().split(/\s+/).join(' ');
+        if (!value || state.entities.some(e => e.kind === kind && e.value === value)) return;
+        const f = entityFilter(kind, value);
+        if (f) state.entities.push(f);
+      });
+    });
     state.sort = ['az', 'za', 'country', 'region'].includes(p.get('sort')) ? p.get('sort') : 'az';
     state.page = Math.max(1, parseInt(p.get('page'), 10) || 1);
   }
@@ -355,7 +367,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (opts.disabled) b.disabled = true;
     b.addEventListener('click', () => {
       state.page = page;
-      update(true, true);
+      update(true);
+      // Page numbers go back to the very top (breadcrumb + title)
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     });
     return b;
   }
@@ -396,6 +410,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // Controls follow the state
     qInput.value = state.q;
     sortSelect.value = state.sort;
+    document.querySelectorAll('.dict-sort-opt').forEach(o => {
+      const on = o.dataset.sort === state.sort;
+      o.classList.toggle('is-selected', on);
+      o.setAttribute('aria-selected', String(on));
+      if (on) setDropdownValue('sort', o.textContent);
+    });
     document.querySelectorAll('input[name="country"]').forEach(i => { i.checked = state.countries.has(i.value); });
     document.querySelectorAll('input[name="tag"]').forEach(i => { i.checked = state.tags.has(i.value); });
     document.querySelectorAll('input[name="xtag"]').forEach(i => { i.checked = state.xtags.has(i.value); });
@@ -406,37 +426,138 @@ document.addEventListener('DOMContentLoaded', () => {
     setDropdownValue('country', state.countries.size === 0
       ? 'All' 
       : state.countries.size === 1 ? countryLabel.get([...state.countries][0]) : `${state.countries.size} countries`);
-    setDropdownValue('tag', state.tags.size === 0
-      ? 'All'
-      : state.tags.size === 1 ? [...state.tags][0] : `${state.tags.size} tags`);
+    checklists.forEach(cl => cl.sync());
 
     // Active filters (each chip removes its filter -> clickable -> rounded)
     const chips = [];
-    if (state.q) chips.push([`“${state.q}”`, () => { state.q = ''; }]);
+    // The dish search is not listed here: Selected is only for Browse by category picks
     state.countries.forEach(c => chips.push([countryLabel.get(c) || c, () => state.countries.delete(c)]));
     state.tags.forEach(t => chips.push([t, () => state.tags.delete(t)]));
     state.xallergens.forEach(a => chips.push([`No ${a}`, () => state.xallergens.delete(a), true]));
     state.xtags.forEach(t => chips.push([`No ${t}`, () => state.xtags.delete(t), true]));
-    state.entities.forEach(e => chips.push([`${e.label}: ${e.value}`, () => {
+    state.entities.forEach(e => chips.push([titleCase(e.value), () => {
       state.entities = state.entities.filter(x => x !== e);
     }]));
     activeRow.hidden = chips.length === 0;
     activeChips.replaceChildren(...chips.map(([label, remove, isExclude]) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'dict-active-chip' + (isExclude ? ' is-exclude' : '');
-      b.textContent = label;
-      b.setAttribute('aria-label', `Remove filter ${label}`);
-      b.addEventListener('click', () => { remove(); state.page = 1; update(true); });
-      return b;
+      const item = document.createElement('label');
+      item.className = 'dict-picked' + (isExclude ? ' is-exclude' : '');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = true;
+      box.setAttribute('aria-label', `Untick ${label}`);
+      box.addEventListener('change', () => { remove(); state.page = 1; update(true); });
+      const text = document.createElement('span');
+      text.textContent = label;
+      item.append(box, text);
+      return item;
     }));
   }
 
   function update(push, scroll) {
     writeLink(push);
     render();
-    if (scroll) document.getElementById('dict-toolbar').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (scroll) document.getElementById('dict-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
+
+  // ------------------------------------------------------------------
+  // Browse by category: two checklist dropdowns
+  //   Ingredients                -> ingredient
+  //   Directions (tabs inside)   -> cooking action, cookware, utensil
+  // Each has a box to find an item. Ticked items are the same filters as the
+  // ?ingredient= / ?action= / ?cookware= / ?utensil= links.
+  // ------------------------------------------------------------------
+  const CAT_WORDS = { ingredient: ['Ingredients', 'an ingredient'], action: ['Cooking actions', 'a cooking action'],
+                      cookware: ['Cookware', 'cookware'], utensil: ['Utensils', 'a utensil'] };
+  const titleCase = (t) => t.replace(/\b\w/g, c => c.toUpperCase());
+  const isChecked = (kind, value) => state.entities.some(e => e.kind === kind && e.value === value);
+
+  function entityFilter(kind, value) {
+    const opt = (ENTITY_OPTIONS[kind] || { options: [] }).options.find(o => o[0] === value);
+    const fromLink = ENTITIES.find(e => e.kind === kind && e.value === value);
+    const ids = opt ? new Set(opt[2]) : fromLink ? fromLink.ids : null;
+    if (!ids) return null;
+    return { kind, label: (ENTITY_OPTIONS[kind] || fromLink).label, value, ids };
+  }
+
+  function toggleEntity(kind, value, on) {
+    state.entities = state.entities.filter(e => !(e.kind === kind && e.value === value));
+    if (on) {
+      const f = entityFilter(kind, value);
+      if (f) state.entities.push(f);
+    }
+    state.page = 1;
+    update(false);
+  }
+
+  const checklists = Array.from(document.querySelectorAll('.dict-dd--browse')).map(dd => {
+    const kinds = dd.dataset.kinds.split(' ').filter(k => ENTITY_OPTIONS[k]);
+    const tabsBox = dd.querySelector('[data-cat-tabs]');
+    const list = dd.querySelector('[data-cat-list]');
+    const q = dd.querySelector('[data-cat-q]');
+    const cl = { dd, kinds, kind: kinds[0] };
+
+    cl.build = () => {
+      if (tabsBox) tabsBox.querySelectorAll('.dict-cat-tab').forEach(b => {
+        const on = b.dataset.kind === cl.kind;
+        b.classList.toggle('is-active', on);
+        b.setAttribute('aria-selected', String(on));
+      });
+      q.placeholder = `Find ${(CAT_WORDS[cl.kind] || ['', 'an item'])[1]}`;
+      const words = norm(q.value).split(/\s+/).filter(Boolean);
+      // ticked ones first, then the most common
+      const shown = ENTITY_OPTIONS[cl.kind].options.filter(([name]) => words.every(w => name.includes(w)))
+        .sort((a, b) => isChecked(cl.kind, b[0]) - isChecked(cl.kind, a[0]));
+      list.replaceChildren(...shown.map(([name, count]) => {
+        const label = document.createElement('label');
+        label.className = 'dict-check';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.value = name;
+        input.addEventListener('change', () => toggleEntity(cl.kind, name, input.checked));
+        const span = document.createElement('span');
+        span.textContent = titleCase(name);
+        const small = document.createElement('small');
+        small.textContent = count;
+        label.append(input, span, small);
+        return label;
+      }));
+      if (!shown.length) {
+        const none = document.createElement('p');
+        none.className = 'dict-cat-none';
+        none.textContent = 'Nothing found.';
+        list.appendChild(none);
+      }
+      cl.sync();
+    };
+
+    // Ticks, tab counts and the button text follow the state (without rebuilding the list)
+    cl.sync = () => {
+      list.querySelectorAll('input[type="checkbox"]').forEach(i => { i.checked = isChecked(cl.kind, i.value); });
+      if (tabsBox) tabsBox.querySelectorAll('.dict-cat-tab').forEach(b => {
+        b.dataset.count = state.entities.filter(e => e.kind === b.dataset.kind).length || '';
+      });
+      const mine = state.entities.filter(e => kinds.includes(e.kind));
+      setDropdownValue(dd.dataset.dd, mine.length === 0 ? 'All'
+        : mine.length === 1 ? titleCase(mine[0].value) : `${mine.length} ticked`);
+    };
+
+    if (tabsBox) {
+      tabsBox.replaceChildren(...kinds.map(kind => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'dict-cat-tab';
+        b.dataset.kind = kind;
+        b.setAttribute('role', 'tab');
+        b.textContent = (CAT_WORDS[kind] || [ENTITY_OPTIONS[kind].label])[0];
+        b.addEventListener('click', () => { cl.kind = kind; q.value = ''; cl.build(); q.focus(); });
+        return b;
+      }));
+    }
+    q.addEventListener('input', cl.build);
+    q.addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
+    return cl;
+  });
 
   // ------------------------------------------------------------------
   // Controls
@@ -449,6 +570,13 @@ document.addEventListener('DOMContentLoaded', () => {
       state.page = 1;
       update(false);
     }, 200);
+  });
+  // Search button (and Enter): search now and jump to the results
+  document.getElementById('dict-hero-search').addEventListener('submit', () => {
+    clearTimeout(typingTimer);
+    state.q = qInput.value.trim();
+    state.page = 1;
+    update(true, true);
   });
   sortSelect.addEventListener('change', () => {
     state.sort = sortSelect.value;
@@ -467,7 +595,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
   document.getElementById('dict-reset').addEventListener('click', () => {
-    state.q = '';
+    // "Untick all" clears the Browse by category picks but keeps the dish search
     state.countries.clear();
     state.tags.clear();
     state.xtags.clear();
@@ -476,13 +604,24 @@ document.addEventListener('DOMContentLoaded', () => {
     state.page = 1;
     update(true);
   });
+  // Sort: custom list (a native select shows the system's blue highlight)
+  document.querySelectorAll('.dict-sort-opt').forEach(o => {
+    o.addEventListener('click', () => {
+      sortSelect.value = o.dataset.sort;
+      sortSelect.dispatchEvent(new Event('change'));
+      closeAll();
+      document.querySelector('.dict-dd[data-dd="sort"] .dict-dd-btn').focus();
+    });
+  });
   window.addEventListener('popstate', () => { readLink(); render(); });
 
   // Dropdowns (Origin, Tags)
   const dropdowns = Array.from(document.querySelectorAll('.dict-dd'));
   function setDropdownValue(name, text) {
     const el = document.querySelector(`.dict-dd[data-dd="${name}"] [data-dd-value]`);
-    if (el) el.textContent = text;
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle('is-empty', text === 'All');   // grey like the home page placeholders
   }
   function closeAll(except) {
     dropdowns.forEach(dd => {
@@ -501,6 +640,8 @@ document.addEventListener('DOMContentLoaded', () => {
       panel.hidden = !open;
       btn.setAttribute('aria-expanded', String(open));
       dd.classList.toggle('is-open', open);
+      const cl = checklists.find(c => c.dd === dd);
+      if (open && cl) cl.build();
     });
   });
   document.addEventListener('click', (e) => { if (!e.target.closest('.dict-dd')) closeAll(); });
@@ -508,5 +649,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   readLink();
   writeLink(false);
+  checklists.forEach(cl => {
+    const first = state.entities.find(e => cl.kinds.includes(e.kind));
+    if (first) cl.kind = first.kind;
+    cl.build();
+  });
   render();
 });
