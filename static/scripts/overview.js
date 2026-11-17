@@ -142,9 +142,14 @@ document.addEventListener('DOMContentLoaded', () => {
   // Small map in the right column (click it to open the full map)
   // ------------------------------------------------------------------
   function drawSmall() {
-    const svg = document.getElementById('ov-map-svg');
-    const box = document.getElementById('ov-map-box');
-    const tip = document.getElementById('ov-map-tooltip');
+    drawSmallIn('ov-map-svg', 'ov-map-box', 'ov-map-tooltip');
+    drawSmallIn('ov-kp-map-svg', 'ov-kp-mapbox', null);   // thumbnail in the phone panel
+  }
+
+  function drawSmallIn(svgId, boxId, tipId) {
+    const svg = document.getElementById(svgId);
+    const box = document.getElementById(boxId);
+    const tip = tipId ? document.getElementById(tipId) : null;
     if (!features || !svg || !box) return;
     const w = box.clientWidth, h = box.clientHeight;
     if (w < 20 || h < 20) return;
@@ -160,8 +165,8 @@ document.addEventListener('DOMContentLoaded', () => {
       .classed('is-listed', f => byKey.has(norm(f.properties.name)))
       .classed('is-origin', f => norm(f.properties.name) === originKey)
       .classed('is-highlight', f => highlighted && norm(f.properties.name) === norm(highlighted))
-      .on('mousemove', (event, f) => showCountryTip(event, f, box, tip))
-      .on('mouseleave', () => { tip.hidden = true; });
+      .on('mousemove', tip ? (event, f) => showCountryTip(event, f, box, tip) : null)
+      .on('mouseleave', tip ? () => { tip.hidden = true; } : null);
   }
 
   function showCountryTip(event, f, box, tip) {
@@ -207,6 +212,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const tip = document.getElementById('ovm-tooltip');
     const panel = document.getElementById('ovm-panel');
     const filterBar = document.getElementById('ovm-filters');
+    const side = document.getElementById('ovm-side');
+    const toggleBtn = document.getElementById('ovm-toggle');
+
+    // Side panel (bottom sheet on phones): can be collapsed, opens by itself when a pin is picked
+    function setPanelOpen(open) {
+      side.classList.toggle('is-collapsed', !open);
+      modal.classList.toggle('panel-collapsed', !open);
+      toggleBtn.setAttribute('aria-expanded', String(open));
+      toggleBtn.setAttribute('aria-label', open ? 'Hide the dish panel' : 'Show the dish panel');
+    }
+    toggleBtn.addEventListener('click', () => setPanelOpen(side.classList.contains('is-collapsed')));
     const SOURCE = MAP_DATA.source;
     const DISHES = MAP_DATA.dishes || [];
     const NO_IMAGE = '/static/assets/no-image.svg';
@@ -339,18 +355,49 @@ document.addEventListener('DOMContentLoaded', () => {
           });
         d3.select(box).call(zoom).on('dblclick.zoom', null);
       }
-      zoom.translateExtent([[0, 0], [w, h]]).extent([[0, 0], [w, h]]);
+      // Big margin around the map so it can be dragged anywhere, even when not zoomed in
+      // and even when part of it is under the side panel
+      const padX = Math.max(w * 0.6, 440), padY = Math.max(h * 0.6, 320);
+      zoom.translateExtent([[-padX, -padY], [w + padX, h + padY]]).extent([[0, 0], [w, h]]);
       if (!pins.length) buildPins();
       applyCountryShade();
       positionPins();
     }
 
+    // The part of the map that isn't under the side panel (left on desktop, bottom sheet on phones)
+    const phoneLayout = window.matchMedia('(max-width: 768px)');
+    function visibleArea() {
+      const w = box.clientWidth, h = box.clientHeight;
+      const open = !side.classList.contains('is-collapsed');
+      const left = open && !phoneLayout.matches ? side.offsetWidth : 0;
+      const bottom = open && phoneLayout.matches ? side.offsetHeight : 0;
+      return { w: w - left, h: h - bottom, cx: left + (w - left) / 2, cy: (h - bottom) / 2 };
+    }
+    // Whole map, centred in the visible part
+    function homeTransform() {
+      const v = visibleArea();
+      return d3.zoomIdentity.translate(v.cx - box.clientWidth / 2, v.cy - box.clientHeight / 2);
+    }
+    function goTo(transform, ms = 250) {
+      if (zoom) d3.select(box).transition().duration(ms).call(zoom.transform, transform);
+    }
+
     const zoomBy = (k) => zoom && d3.select(box).transition().duration(250).call(zoom.scaleBy, k);
     document.getElementById('ovm-zoom-in').addEventListener('click', () => zoomBy(1.6));
     document.getElementById('ovm-zoom-out').addEventListener('click', () => zoomBy(1 / 1.6));
-    document.getElementById('ovm-zoom-reset').addEventListener('click', () => {
-      if (zoom) d3.select(box).transition().duration(250).call(zoom.transform, d3.zoomIdentity);
-    });
+    document.getElementById('ovm-zoom-reset').addEventListener('click', () => goTo(homeTransform()));
+
+    // Target button: zoom in on the searched dish and show it in the panel
+    function focusSource() {
+      const pin = pins.find(p => p.isSource);
+      if (!pin || !projection) return;
+      select(pin);                                   // opens the panel, so measure after
+      const [x, y] = projection(pin.lonlat);
+      const v = visibleArea();
+      const k = Math.max(zoomT.k, 3.5);
+      goTo(d3.zoomIdentity.translate(v.cx - k * x, v.cy - k * y).scale(k), 450);
+    }
+    document.getElementById('ovm-focus').addEventListener('click', focusSource);
 
     // ---------- country filter ----------
     function buildFilters() {
@@ -394,15 +441,15 @@ document.addEventListener('DOMContentLoaded', () => {
     function fitToPins() {
       if (!zoom || !projection) return;
       const sel = d3.select(box).transition().duration(450);
-      if (!countriesOn.size) { sel.call(zoom.transform, d3.zoomIdentity); return; }
+      if (!countriesOn.size) { sel.call(zoom.transform, homeTransform()); return; }
       const pts = pins.filter(p => !p.isSource && !p.el.hidden).map(p => projection(p.lonlat)).filter(Boolean);
       if (!pts.length) return;
-      const w = box.clientWidth, h = box.clientHeight;
+      const v = visibleArea();           // fit into the part not covered by the panel
       const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
       const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
-      const k = Math.max(1, Math.min(6, 0.7 / Math.max((x1 - x0 + 1) / w, (y1 - y0 + 1) / h)));
+      const k = Math.max(1, Math.min(6, 0.7 / Math.max((x1 - x0 + 1) / v.w, (y1 - y0 + 1) / v.h)));
       const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-      sel.call(zoom.transform, d3.zoomIdentity.translate(w / 2 - k * cx, h / 2 - k * cy).scale(k));
+      sel.call(zoom.transform, d3.zoomIdentity.translate(v.cx - k * cx, v.cy - k * cy).scale(k));
     }
 
     function applyCountryShade() {
@@ -427,6 +474,7 @@ document.addEventListener('DOMContentLoaded', () => {
       selected = pin;
       pin.el.classList.add('is-selected');
       renderPanel();
+      setPanelOpen(true);
     }
 
     function renderPanel() {
@@ -436,13 +484,18 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="ovm-dish-img">
           <img src="${escapeHtml(d.image || NO_IMAGE)}" alt="" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${NO_IMAGE}'">
           <span class="ovm-country">${escapeHtml(d.label)}</span>
-          ${pin.isSource ? '' : `<span class="ovm-rank ${d.rank <= 3 ? 'is-top' : ''}"><small>RANK</small>${d.rank}</span>`}
+          ${pin.isSource ? '' : `<span class="ovm-rank ${d.rank <= 3 ? 'is-top' : ''}"><small>Rank</small>${d.rank}</span>`}
         </div>
         <div class="ovm-dish-head">
-          <span class="ovm-eyebrow">${pin.isSource ? 'YOUR DISH' : `${d.score}% SIMILAR TO ${escapeHtml(SOURCE.title.toUpperCase())}`}</span>
+          <span class="ovm-eyebrow">${pin.isSource ? 'Your dish' : `${d.score}% similar to ${escapeHtml(SOURCE.title)}`}</span>
           <h3>${escapeHtml(d.title)}</h3>
           ${d.alt && d.alt.toLowerCase() !== d.title.toLowerCase() ? `<p class="ovm-alt">${escapeHtml(d.alt)}</p>` : ''}
-          ${pin.isSource ? '' : `<a class="ovm-cta" href="${escapeHtml(d.url)}">View full comparison <span aria-hidden="true">&rarr;</span></a>`}
+          <div class="ovm-actions">
+            ${d.recipe ? `<a class="ovm-recipe" href="${escapeHtml(d.recipe)}" target="_blank" rel="noopener">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>
+              Original recipe</a>` : ''}
+            ${pin.isSource ? '' : `<a class="ovm-cta" href="${escapeHtml(d.url)}">View full comparison <span class="ovm-cta-arrow" aria-hidden="true">&rarr;</span></a>`}
+          </div>
         </div>`;
 
       let recipe;
@@ -470,8 +523,8 @@ document.addEventListener('DOMContentLoaded', () => {
       panel.innerHTML = `
         ${head}
         <div class="ovm-tabs" role="tablist">
-          <button type="button" role="tab" class="ovm-tab" data-tab="recipe">RECIPE BREAKDOWN</button>
-          <button type="button" role="tab" class="ovm-tab" data-tab="culture">CULTURAL INFO</button>
+          <button type="button" role="tab" class="ovm-tab" data-tab="recipe">Recipe breakdown</button>
+          <button type="button" role="tab" class="ovm-tab" data-tab="culture">Cultural info</button>
         </div>
         <div class="ovm-tabpanel" data-tab="recipe">${recipe}</div>
         <div class="ovm-tabpanel" data-tab="culture"><p class="ovm-loading">Loading cultural information&hellip;</p></div>`;
@@ -495,8 +548,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const fill = (info) => {
         if (!selected || selected.dish.idx !== idx) return;
         const badge = info.source === 'ai'
-          ? '<span class="badge-mini">AI-GENERATED</span><span class="footer-note">By GPT. Verify before citing.</span>'
-          : '<span class="badge-mini">SUMMARY</span><span class="footer-note">Built from the dataset (GPT unavailable).</span>';
+          ? '<span class="badge-mini">AI-generated</span><span class="footer-note">By GPT. Verify before citing.</span>'
+          : '<span class="badge-mini">Summary</span><span class="footer-note">Built from the dataset (GPT unavailable).</span>';
         target.innerHTML = `
           <h4>Culture</h4><p>${escapeHtml(info.culture)}</p>
           <h4>History</h4><p>${escapeHtml(info.history)}</p>
@@ -514,8 +567,13 @@ document.addEventListener('DOMContentLoaded', () => {
     return {
       draw,
       open() {
+        setPanelOpen(true);
         draw();
-        if (!selected) select(pins.filter(p => !p.isSource).sort((a, b) => a.dish.rank - b.dish.rank)[0] || pins[0]);
+        if (!selected) {
+          select(pins.filter(p => !p.isSource).sort((a, b) => a.dish.rank - b.dish.rank)[0] || pins[0]);
+          // First open: centre the map in the part not covered by the panel
+          if (zoom) d3.select(box).call(zoom.transform, homeTransform());
+        }
       },
     };
   })();
@@ -554,6 +612,29 @@ document.addEventListener('DOMContentLoaded', () => {
     document.documentElement.classList.remove('menu-open');
   }
   document.getElementById('ov-map-open').addEventListener('click', openModal);
+  document.querySelectorAll('[data-open-map]').forEach(b => b.addEventListener('click', openModal));
+
+  // ------------------------------------------------------------------
+  // Phones: Google-style panel. "Show more" opens everything; "Show less" stays at the top.
+  // ------------------------------------------------------------------
+  const kp = document.getElementById('ov-kp');
+  if (kp) {
+    const less = kp.querySelector('.ov-kp-less');
+    const more = kp.querySelector('.ov-kp-more');
+    const setOpen = (open) => {
+      kp.classList.toggle('is-open', open);
+      less.hidden = !open;
+      more.hidden = open;
+      more.setAttribute('aria-expanded', String(open));
+      if (!open) {
+        // Back to the short version: bring the panel back into view
+        const top = kp.getBoundingClientRect().top + window.scrollY - 70;
+        if (window.scrollY > top) window.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    more.addEventListener('click', () => setOpen(true));
+    less.addEventListener('click', () => setOpen(false));
+  }
   document.getElementById('ov-map-box').addEventListener('click', openModal);
   document.getElementById('ov-modal-close').addEventListener('click', closeModal);
   modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });

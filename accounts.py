@@ -17,17 +17,20 @@ The functions keep the names the app already used with SQLite (authenticate, get
 User ids are now Supabase UUIDs (text) instead of numbers.
 """
 import datetime
-import json
 import os
 import re
 
 import requests
 
+# Always read the .env next to this file (not whichever folder the app was started from).
+# override=True: an empty SUPABASE_... variable already set in Windows can't hide the .env value.
+ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(ENV_PATH, override=True)
 except ImportError:
-    pass
+    print("[CuiSync] python-dotenv is not installed in this Python, so .env is not read. "
+          "Activate the venv or run: pip install python-dotenv")
 
 ROLES = ("user", "admin")
 COOKING_ROLES = ("Home cook", "Chef", "Student", "Food researcher", "Other")
@@ -53,8 +56,13 @@ def init(_data_dir=None):
     ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "").strip()
     SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
     if not configured():
-        print("[CuiSync] Supabase is not set up: put SUPABASE_URL, SUPABASE_ANON_KEY and "
-              "SUPABASE_SERVICE_ROLE_KEY in .env. Log in / accounts won't work until then.")
+        missing = [name for name, value in (("SUPABASE_URL", URL), ("SUPABASE_ANON_KEY", ANON_KEY),
+                                            ("SUPABASE_SERVICE_ROLE_KEY", SERVICE_KEY)) if not value]
+        print(f"[CuiSync] Supabase is not set up: missing {', '.join(missing)} "
+              f"(looked in {ENV_PATH}{'' if os.path.exists(ENV_PATH) else ', which does not exist'}). "
+              "Log in / accounts won't work until then.")
+    else:
+        print(f"[CuiSync] Supabase settings found ({URL}).")
 
 
 def configured():
@@ -74,6 +82,14 @@ def _headers(key, extra=None):
 
 
 def _call(method, path, key=None, params=None, json=None, prefer=None, ok=(200, 201, 204)):
+    if not configured():
+        # Read .env again before giving up (in case the settings were added after the app started)
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(ENV_PATH, override=True)
+        except ImportError:
+            pass
+        init()
     if not configured():
         raise SupabaseError("Accounts are not set up yet (Supabase settings are missing in .env).")
     extra = {"Prefer": prefer} if prefer else None
@@ -408,8 +424,9 @@ def recent_searches(limit=8):
     return out
 
 
-# ---------------- recent searches (opened comparisons, ui-overhaul) ----------------
-# Stored in the Supabase table recent_comparisons (see supabase_setup.sql, step 6).
+# ---------------- recent searches (opened comparisons, home page row) ----------------
+# Table public.recent_comparisons (see supabase_setup.sql, section "Recent searches").
+# If the table isn't made yet, these do nothing / return nothing instead of breaking pages.
 RECENT_MAX = 100   # kept per user
 
 
@@ -417,36 +434,36 @@ def add_recent(user_id, pair_key, entry):
     """Save an opened comparison. The same pair moves back to the top instead of repeating."""
     if not _valid_id(user_id):
         return
-    _rest("DELETE", "recent_comparisons", params={"user_id": f"eq.{user_id}", "pair_key": f"eq.{pair_key}"})
-    _rest("POST", "recent_comparisons", json={"user_id": user_id, "pair_key": pair_key, "data": entry},
-          prefer="return=minimal")
-    # Keep only the newest RECENT_MAX per user
-    old = _rest("GET", "recent_comparisons", params={"user_id": f"eq.{user_id}", "select": "id",
-                                                     "order": "id.desc", "offset": str(RECENT_MAX)}).json()
-    if old:
-        ids = ",".join(str(r["id"]) for r in old)
-        _rest("DELETE", "recent_comparisons", params={"user_id": f"eq.{user_id}", "id": f"in.({ids})"})
+    try:
+        _rest("DELETE", "recent_comparisons", params={"user_id": f"eq.{user_id}", "pair_key": f"eq.{pair_key}"})
+        _rest("POST", "recent_comparisons", json={"user_id": user_id, "pair_key": pair_key, "data": entry},
+              prefer="return=minimal")
+        # Keep only the newest RECENT_MAX
+        old = _rest("GET", "recent_comparisons", params={
+            "user_id": f"eq.{user_id}", "select": "id", "order": "id.desc",
+            "offset": str(RECENT_MAX), "limit": "1000"}).json()
+        if old:
+            ids = ",".join(str(r["id"]) for r in old)
+            _rest("DELETE", "recent_comparisons", params={"id": f"in.({ids})"})
+    except SupabaseError as error:
+        print("[CuiSync] Recent search not saved (run the Recent searches part of supabase_setup.sql):", error)
 
 
 def list_recent(user_id):
     if not _valid_id(user_id):
         return []
-    rows = _rest("GET", "recent_comparisons", params={"user_id": f"eq.{user_id}", "select": "data",
-                                                      "order": "id.desc", "limit": str(RECENT_MAX)}).json()
-    out = []
-    for row in rows:
-        data = row.get("data")
-        if isinstance(data, str):
-            try:
-                data = json.loads(data)
-            except ValueError:
-                continue
-        if isinstance(data, dict):
-            out.append(data)
-    return out
+    try:
+        rows = _rest("GET", "recent_comparisons", params={
+            "user_id": f"eq.{user_id}", "select": "data", "order": "id.desc", "limit": str(RECENT_MAX)}).json()
+    except SupabaseError:
+        return []
+    return [r["data"] for r in rows if isinstance(r.get("data"), dict)]
 
 
 def clear_recent(user_id):
     if not _valid_id(user_id):
         return
-    _rest("DELETE", "recent_comparisons", params={"user_id": f"eq.{user_id}"})
+    try:
+        _rest("DELETE", "recent_comparisons", params={"user_id": f"eq.{user_id}"})
+    except SupabaseError:
+        pass

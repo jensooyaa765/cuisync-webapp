@@ -81,6 +81,19 @@ CREATE TABLE IF NOT EXISTS public.search_history (
 CREATE INDEX IF NOT EXISTS search_history_user_idx    ON public.search_history (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS search_history_created_idx ON public.search_history (created_at DESC);
 
+-- 3b. Recent searches (UI overhaul) -------------------------------------------
+-- Every dish-vs-dish comparison a logged-in user opened (home page "Recent searches"
+-- row and the All recent searches page). data = a small JSON entry made by app.py.
+CREATE TABLE IF NOT EXISTS public.recent_comparisons (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id     UUID        NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    pair_key    TEXT        NOT NULL,
+    data        JSONB       NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS recent_comparisons_user_idx ON public.recent_comparisons (user_id, id DESC);
+ALTER TABLE public.recent_comparisons ENABLE ROW LEVEL SECURITY;
+
 -- 4. Security: only the server (service key) reads and writes these tables ----
 -- Row Level Security is on with no policies for anon users, so the public
 -- anon / publishable key can't read or change anyone's profile or role.
@@ -125,18 +138,6 @@ REVOKE ALL ON FUNCTION public.cuisync_searches_per_day(INT, TEXT) FROM PUBLIC, a
 GRANT EXECUTE ON FUNCTION public.cuisync_search_counts()            TO service_role;
 GRANT EXECUTE ON FUNCTION public.cuisync_top_dishes(INT)            TO service_role;
 GRANT EXECUTE ON FUNCTION public.cuisync_searches_per_day(INT, TEXT) TO service_role;
-
--- 6. Recent searches (opened comparisons, home page row + "All recent searches") -----
-CREATE TABLE IF NOT EXISTS public.recent_comparisons (
-    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    user_id     UUID        NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-    pair_key    TEXT        NOT NULL,
-    data        JSONB       NOT NULL,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS recent_comparisons_user_idx ON public.recent_comparisons (user_id, id DESC);
--- Only the server (service role) reads and writes it
-ALTER TABLE public.recent_comparisons ENABLE ROW LEVEL SECURITY;
 
 -- Tell the API about the new columns / table / functions right away
 NOTIFY pgrst, 'reload schema';
