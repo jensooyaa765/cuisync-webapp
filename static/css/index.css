@@ -331,7 +331,7 @@ hr {
   padding: 13px 15px;
   border: 1px solid var(--gold-border);
   border-radius: 8px;
-  background: #faf8f5;
+  background: var(--pill-bg);
   color: var(--text-dark);
   cursor: pointer;
   text-align: left;
@@ -341,9 +341,18 @@ hr {
 .selected-dish-card:hover,
 .selected-dish-card:focus {
   border-color: var(--maroon-main);
-  background: #f4eddd;
+  background: var(--input-bg);
   transform: translateY(-1px);
   outline: none;
+}
+
+/* Just a preview (not clickable): no hover look */
+.selected-dish-card.is-static { cursor: default; }
+.selected-dish-card.is-static:hover,
+.selected-dish-card.is-static:focus {
+  border-color: var(--gold-border);
+  background: var(--pill-bg);
+  transform: none;
 }
 
 .selected-dish-info {
@@ -413,7 +422,7 @@ hr {
   padding: 14px 16px;
   border: 1.5px dashed var(--maroon-main);
   border-radius: 8px;
-  background: #faf8f5;
+  background: var(--pill-bg);
   color: var(--text-dark);
   cursor: pointer;
   text-align: left;
@@ -425,7 +434,7 @@ hr {
 .select-dish-prompt:hover,
 .select-dish-prompt:focus-visible {
   border-style: solid;
-  background: #f4eddd;
+  background: var(--input-bg);
   transform: translateY(-1px);
   outline: none;
 }
@@ -1038,7 +1047,7 @@ hr {
 }
 
 .sim-warning-btn {
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 11px 24px;
   font-family: inherit;
   font-size: 0.72rem;
@@ -1118,3 +1127,24 @@ hr {
     height: 120px;
   }
 }
+
+/* ==========================================================================
+   TEXT RULES (whole system)
+   - Section headers: Playfair Display, ALL CAPS
+   - Everything else (buttons, tabs, labels, badges): sentence case
+   - Dish names on cards: Playfair Display, maroon
+   ========================================================================== */
+.modal-title,
+.sim-warning-title { font-family: 'Playfair Display', serif; text-transform: uppercase; letter-spacing: 0.04em; }
+.dish-picker-info .dish-picker-country { text-transform: none; letter-spacing: 0.02em; }
+.hero-content .subtitle,
+.btn,
+.tab-btn,
+.form-group label,
+.selected-dish-label,
+.tag-summary-title,
+.sim-warning-score-label,
+.sim-warning-btn { letter-spacing: 0.02em; }
+/* Dish names on cards */
+.selected-dish-card strong,
+.dish-picker-info strong { color: var(--maroon-main); }

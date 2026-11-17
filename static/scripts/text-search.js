@@ -46,7 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function updateOriginDisplay() {
     const option = originSelect.options[originSelect.selectedIndex];
     const hasCountry = Boolean(originSelect.value && option);
-    originDisplay.textContent = hasCountry ? option.textContent : 'Country of Origin';
+    originDisplay.textContent = hasCountry ? option.textContent : 'Country of origin';
     originDisplay.classList.toggle('is-placeholder', !hasCountry);
   }
 
@@ -64,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---------------- chosen dish ----------------
   function updateButton() {
-    submitButton.textContent = 'SEARCH THE DISH';
+    submitButton.textContent = 'Search the dish';
   }
 
   function clearPick() {
@@ -271,7 +271,7 @@ document.addEventListener('DOMContentLoaded', () => {
           ? `<p class="dish-card-alt"><i>${esc(d.alternative_title)}</i></p>` : ''}
         ${found}
         <div class="dish-card-tags">${(d.tags || []).slice(0, 4).map((t) => `<span class="tag-chip small">${esc(t)}</span>`).join('')}</div>
-        <span class="popup-select">SELECT THIS DISH</span>
+        <span class="popup-select">Select this dish</span>
       </div>`;
     const img = button.querySelector('img');
     img.addEventListener('error', () => { img.onerror = null; img.src = NO_IMAGE; }, { once: true });
@@ -356,10 +356,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !popup.classList.contains('hidden')) closePopup();
   });
-  selectedCard.addEventListener('click', () => {
-    if (lastResults && lastResults.dishes.length > 1) showPopup(lastResults);
-    else dishInput.focus();
-  });
   targetSelect.addEventListener('change', () => {
     targetSelect.classList.remove('needs-attention');
   });
@@ -371,7 +367,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function findDishes(searchMode, q) {
     submitButton.disabled = true;
     const label = submitButton.textContent;
-    submitButton.textContent = 'SEARCHING\u2026';
+    submitButton.textContent = 'Searching\u2026';
     try {
       const r = await fetch(`/api/find-dishes?mode=${searchMode}&q=${encodeURIComponent(q)}`,
         { credentials: 'same-origin' });
@@ -429,6 +425,31 @@ document.addEventListener('DOMContentLoaded', () => {
   if (params.get('mode') === 'dish' && params.get('q')) {
     dishInput.value = params.get('q');
     runSearch(false);
+  }
+
+  // ---------------- "Find similar dishes" from the Dish Dictionary: /?dish=<index> ----------------
+  // Puts that exact dish in the search bar (with its country and card); the user then picks
+  // a target country and searches.
+  if (/^\d+$/.test(params.get('dish') || '')) {
+    if (typeof switchTab === 'function') switchTab('text');
+    fetch('/api/dish/' + params.get('dish'))
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((d) => {
+        lastResults = null;
+        pickDish({
+          title: d.title,
+          recipe_id: d.recipe_id,
+          country_value: d.country,
+          alternative_title: d.alt && d.alt.toLowerCase() !== d.title.toLowerCase() ? d.alt : '',
+          country_label: d.label,
+          image_link: d.image,
+        }, true);
+        updateInputActions();
+        // Clean link, so a refresh doesn't pick it again
+        history.replaceState(null, '', location.pathname + location.hash);
+        if (!targetSelect.value) targetSelect.classList.add('needs-attention');
+      })
+      .catch(() => {});
   }
   updateOriginDisplay();
   updateInputActions();

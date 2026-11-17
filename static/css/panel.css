@@ -517,6 +517,14 @@ a.tag-chip:hover { background: var(--gold-light); }
   font: inherit;
   color: inherit;
 }
+/* Cream like the popup, a bit darker on hover */
+.popup-dish-card {
+  background: var(--pill-bg);
+  transition: transform 0.2s, box-shadow 0.2s, background-color 0.2s;
+}
+.popup-dish-card:hover { background: var(--input-bg); }
+.popup-dish-card .tag-chip { transition: background-color 0.2s; }
+.popup-dish-card:hover .tag-chip { background: var(--pill-bg); }   /* stay visible on the darker card */
 .popup-dish-card:focus-visible { outline: 3px solid var(--gold-accent); outline-offset: 2px; }
 .popup-select {
   margin-top: auto;
@@ -947,3 +955,28 @@ span.tag-chip:not(.removable) { border-radius: 4px; }
   }
   .panel-main { padding-left: max(20px, env(safe-area-inset-left, 0px)); padding-right: max(20px, env(safe-area-inset-right, 0px)); }
 }
+
+
+/* ==========================================================================
+   TEXT RULES (whole system)
+   - Section headers: Playfair Display, ALL CAPS
+   - Everything else (buttons, tabs, labels, badges): sentence case
+   - Dish names on cards: Playfair Display, maroon
+   ========================================================================== */
+.cultural-card h4,
+.panel-card h2,
+.modal-title { font-family: 'Playfair Display', serif; text-transform: uppercase; letter-spacing: 0.04em; }
+.panel-table th,
+.stat small,
+.tag-group-name,
+.dish-card-country,
+.cultural-country,
+.home-tag-group-name,
+.dropzone-btn,
+.tag-quick-label,
+.tag-summary-chip .tag-summary-group { text-transform: none; letter-spacing: 0.02em; }
+.search-mode-btn,
+.popup-select { letter-spacing: 0.02em; }
+.tag-summary-title { letter-spacing: 0.02em; }
+/* Dish names on cards */
+.dish-card-body h3 { color: var(--maroon-main); }

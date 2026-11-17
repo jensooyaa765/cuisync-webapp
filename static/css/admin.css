@@ -550,3 +550,21 @@ code { font-family: ui-monospace, Menlo, monospace; font-size: 0.85em; }
 /* Admin log in without the pills: logo at the top, text centred in the remaining space */
 .login-brand.no-pills { justify-content: flex-start; }
 .login-brand.no-pills .login-brand-copy { margin: auto 0; }
+
+
+/* ==========================================================================
+   TEXT RULES (whole system)
+   - Section headers: Playfair Display, ALL CAPS
+   - Everything else (buttons, tabs, labels, badges): sentence case
+   ========================================================================== */
+.card-head h2,
+.country-top h3,
+.tag-cat,
+.health-title { font-family: 'Playfair Display', serif; text-transform: uppercase; letter-spacing: 0.04em; }
+.admin-brand-sub,
+.nav-group,
+.eyebrow,
+.btn,
+.field label, .label-row label,
+.table th,
+.kpi-label { text-transform: none; letter-spacing: 0.02em; }

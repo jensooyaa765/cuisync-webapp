@@ -116,7 +116,8 @@ document.addEventListener('DOMContentLoaded', () => {
       b.className = 'dict-tag' + (i === 0 && t === d._region ? ' is-region' : '') + (state.tags.has(t) ? ' is-active' : '');
       b.textContent = t;
       b.title = state.tags.has(t) ? `Filtering by ${t}` : `Show all dishes tagged ${t}`;
-      b.addEventListener('click', () => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();   // a tag filters the page; the rest of the card opens the popup
         if (state.tags.has(t)) return;
         state.tags.add(t);
         state.page = 1;
@@ -124,8 +125,210 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       tagBox.appendChild(b);
     });
+
+    // The rest of the card opens the dish popup
+    li.tabIndex = 0;
+    li.setAttribute('role', 'button');
+    li.setAttribute('aria-label', `${d.t}, ${d.l}. Open details`);
+    li.addEventListener('click', () => openDish(d));
+    li.addEventListener('keydown', (e) => {
+      if (e.target !== li || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault();
+      openDish(d);
+    });
     return li;
   }
+
+  // ------------------------------------------------------------------
+  // Dish popup: image + name + tags + "Find similar dishes" on the left,
+  // Recipe breakdown / Culture & history / Health info tabs on the right
+  // (TEMPLATE content for now, from /api/dish/<id>)
+  // ------------------------------------------------------------------
+  const pop = document.getElementById('dp-overlay');
+  const popDialog = pop.querySelector('.dp-dialog');
+  const popBody = document.getElementById('dp-body');
+  const popTabs = Array.from(pop.querySelectorAll('.dp-tab'));
+  const esc = (t) => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const dishCache = new Map();
+  let popFor = null;       // the dish being shown
+  let popOpener = null;    // focus goes back here on close
+
+  function popTab(name, focus) {
+    popTabs.forEach(t => {
+      const on = t.dataset.tab === name;
+      t.classList.toggle('is-active', on);
+      t.setAttribute('aria-selected', String(on));
+      t.tabIndex = on ? 0 : -1;
+      document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+      if (on && focus) t.focus();
+    });
+    popBody.scrollTop = 0;
+  }
+  popTabs.forEach((t, i) => {
+    t.addEventListener('click', () => popTab(t.dataset.tab));
+    t.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      e.preventDefault();
+      popTab(popTabs[(i + (e.key === 'ArrowRight' ? 1 : popTabs.length - 1)) % popTabs.length].dataset.tab, true);
+    });
+  });
+
+  const loading = (what) => `<p class="dp-loading">Loading ${what}&hellip;</p>`;
+  const templateNote = (text) => `
+    <div class="dp-note"><span class="dp-badge">Template preview</span><span>${text}</span></div>`;
+
+  function recipeHtml(info) {
+    const groups = [['ingredient', 'Ingredients'], ['action', 'Cooking actions'],
+                    ['cookware', 'Cookware'], ['utensil', 'Utensils']];
+    return `
+      <p class="dp-intro">The ingredients, cooking actions and tools in this recipe. Click any of them to see every dish that has it.</p>
+      ${groups.map(([kind, label]) => {
+        const items = (info.entities && info.entities[kind]) || [];
+        return `
+          <div class="dp-group">
+            <h4>${label}</h4>
+            <div class="dp-chips">${items.length
+              ? items.map(n => `<a class="dp-chip" href="/dictionary?${kind}=${encodeURIComponent(n.toLowerCase())}" title="See every dish with ${esc(n.toLowerCase())}">${esc(n)}</a>`).join('')
+              : '<span class="dp-none">None listed.</span>'}</div>
+          </div>`;
+      }).join('')}
+      ${info.recipe ? `<a class="dp-recipe" href="${esc(info.recipe)}" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>
+        Original recipe</a>` : ''}`;
+  }
+
+  function cultureHtml(info) {
+    const c = info.connection || { paragraphs: [] };
+    const admin = info.admin_fields && info.admin_fields.length
+      ? `<p class="dp-admin">${esc(info.admin_fields.join(' and '))} notes added by the CuiSync admin.</p>` : '';
+    return `
+      <h4>Culture</h4><p>${esc(info.culture)}</p>
+      <h4>History</h4><p>${esc(info.history)}</p>
+      ${admin}
+      <div class="dp-heritage">
+        <span class="dp-eyebrow">${esc(c.title || info.label)} &middot; ${esc(c.subtitle || 'Culinary origin & heritage')}</span>
+        ${(c.paragraphs || []).map(p => `<p>${esc(p)}</p>`).join('')}
+      </div>
+      ${templateNote(info.source === 'ai'
+        ? 'Culture and history written by GPT. The country note is still a template.'
+        : 'This section will be generated by AI from a prompt. Showing a template built from the dataset for now.')}`;
+  }
+
+  function healthHtml(info) {
+    const rows = ((info.nutrition && info.nutrition.rows) || []).map(r => `
+      <li class="dp-nutrient">
+        <strong>${esc(r.name)}</strong>
+        <span>${r.value ? esc(r.value) : 'Value pending (nutrition API)'}${r.from && r.from.length ? ` &mdash; from ${esc(r.from.join(', '))}` : ''}</span>
+      </li>`).join('');
+    const notes = (info.health || []).length
+      ? info.health.map(h => `<li>${esc(h)}</li>`).join('')
+      : '<li>No nutrition notes for these ingredients yet.</li>';
+    // Every allergen group as a tag: filled = in this dish, outlined = not.
+    // Each one shows the dishes that are free from it.
+    const found = new Map((info.allergens || []).map(a => [a.name, a]));
+    const groups = info.allergen_groups || Array.from(found.keys());
+    const tags = groups.map(name => {
+      const a = found.get(name);
+      const cls = 'dp-allergen' + (a ? ' is-present' : '') + (a && a.avoid ? ' is-avoid' : '');
+      const title = a ? `In this dish (from ${a.from.join(', ')}). Click to see dishes without ${name}.`
+                      : `Not in this dish. Click to see every dish without ${name}.`;
+      return `<li><a class="${cls}" href="/dictionary?xallergen=${encodeURIComponent(name)}" title="${esc(title)}">${esc(name)}</a></li>`;
+    }).join('');
+    const fromLine = found.size
+      ? `<p class="dp-allergen-from">${Array.from(found.values()).map(a => `<strong>${esc(a.name)}</strong> from ${esc(a.from.join(', '))}${a.avoid ? ' (on your avoid list)' : ''}`).join(' &middot; ')}</p>`
+      : '<p class="dp-allergen-from">None of these were found in the listed ingredients.</p>';
+    return `
+      <h4>Nutrition facts</h4><ul class="dp-nutrients">${rows}</ul>
+      <h4>Ingredient notes</h4><ul class="dp-list">${notes}</ul>
+      <h4>Allergens</h4><ul class="dp-allergens">${tags}</ul>${fromLine}
+      ${templateNote('Nutrition values will come from a nutrition API. Allergens are found from the listed ingredients only; always check the full recipe and product labels.')}`;
+  }
+
+  function fillPopup(info) {
+    document.getElementById('dp-panel-recipe').innerHTML = recipeHtml(info);
+    document.getElementById('dp-panel-culture').innerHTML = cultureHtml(info);
+    document.getElementById('dp-panel-health').innerHTML = healthHtml(info);
+  }
+
+  function openDish(d) {
+    popFor = d;
+    popOpener = document.activeElement;
+    const img = document.getElementById('dp-img');
+    img.onerror = () => { img.onerror = null; img.src = NO_IMAGE; };
+    img.src = d.i || NO_IMAGE;
+    document.getElementById('dp-country').textContent = d.l;
+    document.getElementById('dp-title').textContent = d.t;
+    const alt = document.getElementById('dp-alt');
+    alt.textContent = d.a && d.a.toLowerCase() !== d.t.toLowerCase() ? d.a : '';
+    alt.hidden = !alt.textContent;
+
+    // Tags: clickable, they close the popup and filter the page (like the card tags)
+    const tagBox = document.getElementById('dp-tags');
+    tagBox.innerHTML = '';
+    d.g.forEach(t => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'dict-tag' + (t === d._region ? ' is-region' : '') + (state.tags.has(t) ? ' is-active' : '');
+      b.textContent = t;
+      b.title = `Show all dishes tagged ${t}`;
+      b.addEventListener('click', () => {
+        closeDish();
+        if (state.tags.has(t)) return;
+        state.tags.add(t);
+        state.page = 1;
+        update(true, true);
+      });
+      tagBox.appendChild(b);
+    });
+    // Puts this dish in the home page "Search by text" bar
+    document.getElementById('dp-similar').href = `/?dish=${d.id}#search-section`;
+
+    ['recipe', 'culture', 'health'].forEach((k, i) => {
+      document.getElementById('dp-panel-' + k).innerHTML =
+        loading(['the recipe breakdown', 'cultural information', 'health information'][i]);
+    });
+    popTab('recipe');
+    pop.hidden = false;
+    document.body.classList.add('dp-open');
+    requestAnimationFrame(() => pop.classList.add('is-open'));
+    popDialog.focus();
+
+    const cached = dishCache.get(d.id);
+    (cached ? Promise.resolve(cached) : fetch('/api/dish/' + d.id).then(r => {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })).then(info => {
+      dishCache.set(d.id, info);
+      if (popFor === d) fillPopup(info);
+    }).catch(() => {
+      if (popFor !== d) return;
+      ['recipe', 'culture', 'health'].forEach(k => {
+        document.getElementById('dp-panel-' + k).innerHTML = '<p class="dp-loading">This information is not available right now.</p>';
+      });
+    });
+  }
+
+  function closeDish() {
+    if (pop.hidden) return;
+    popFor = null;
+    pop.classList.remove('is-open');
+    pop.hidden = true;
+    document.body.classList.remove('dp-open');
+    if (popOpener && document.contains(popOpener)) popOpener.focus();
+  }
+  document.getElementById('dp-close').addEventListener('click', closeDish);
+  pop.addEventListener('click', (e) => { if (e.target === pop) closeDish(); });
+  document.addEventListener('keydown', (e) => {
+    if (pop.hidden) return;
+    if (e.key === 'Escape') { closeDish(); return; }
+    if (e.key !== 'Tab') return;
+    // Keep keyboard focus inside the popup
+    const f = Array.from(popDialog.querySelectorAll('a[href], button:not([disabled]), [tabindex="0"]'))
+      .filter(el => el.offsetParent !== null);
+    if (!f.length) return;
+    if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+    else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+  });
 
   function pageButtons(total) {
     // 1 2 3 … 9 style

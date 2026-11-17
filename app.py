@@ -965,6 +965,7 @@ def render_overview(source_dish, source_idx, ordered_targets, total_scores, targ
                 "alt": source_card["alternative_title"], "country": source_dish["country"],
                 "label": source_card["country_label"], "image": source_card["image_link"],
                 "tags": source_card["tags"],
+                "recipe": format_recipe_url(source_card.get("recipe_link", "")),
                 "ingredients": sorted(source_ings),
             },
             "dishes": [map_dish(r, source_ings) for r in results],
@@ -984,6 +985,7 @@ def map_dish(card, source_ings):
         "title": card["title"], "alt": card["alternative_title"],
         "country": card["country"], "label": card["country_label"],
         "image": card["image_link"], "tags": card["tags"], "url": card["url"],
+        "recipe": format_recipe_url(RECIPES[card["idx"]].get("recipe_link", "")),
         "ingredients": {
             "shared": sorted(ings & source_ings),
             "source_unique": sorted(source_ings - ings),
@@ -1791,6 +1793,43 @@ def api_dish_info(idx):
     return jsonify(info)
 
 
+@app.route("/api/dish/<int:idx>")
+def api_dish(idx):
+    """Everything the Dish Dictionary popup shows for one dish: the card (name, country,
+    image, tags), its recipe breakdown, culture/history (+ its country's heritage note),
+    and health info. Also used by "Find similar dishes" to fill the home page search."""
+    if not 0 <= idx < len(RECIPES):
+        return jsonify({"error": "invalid recipe index"}), 404
+    recipe = RECIPES[idx]
+    country = recipe["country"]
+    info = cultural_info.dish_info(recipe, STORE.region_of(country), STORE.label_of(country))
+    avoid = set((current_user() or {}).get("avoid_allergens", []))
+    for a in info["allergens"]:
+        a["avoid"] = a["name"] in avoid
+    title = (recipe.get("title") or "").strip()
+    info.update(
+        idx=idx,
+        recipe_id=recipe.get("recipe_id"),
+        title=title,
+        alt=(recipe.get("alternative_title") or "").strip(),
+        country=country.lower(),
+        label=STORE.label_of(country),
+        region=STORE.region_of(country),
+        image=recipe.get("image_link") or "",
+        recipe=format_recipe_url(recipe.get("recipe_link", "")),
+        tags=search_tools.recipe_tags(recipe, STORE.region_of),
+        # kind -> [items]; kind is also the Dish Dictionary filter name (?ingredient=...)
+        entities={kind: parse_items(recipe.get(field, ""))
+                  for kind, (field, _label) in DICTIONARY_ENTITIES.items()},
+        # Template note about the dish's own country (same as the overview with "Any")
+        connection=cultural_info.country_connection(
+            RECIPES, country, None, STORE.label_of, STORE.region_of, parse_items, dish_title=title),
+    )
+    info.pop("prompt", None)
+    info["connection"].pop("prompt", None)
+    return jsonify(info)
+
+
 # ---------------- admin (Oab 1, 2, 5; Galang 3) ----------------
 ADMIN_TABS = ("overview", "users", "dishes", "countries", "prompts", "tags", "dataset")
 
@@ -2223,4 +2262,4 @@ if __name__ == "__main__":
     if not USE_RELOADER or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
         threading.Thread(target=ocr.warm_up, daemon=True).start()
 
-    app.run(host="127.0.0.1", port=8000, debug=False, use_reloader=USE_RELOADER)
+    app.run(host="127.0.0.1", port=8000, debug=False, use_reloader=USE_RELOADER)

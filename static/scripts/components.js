@@ -4,10 +4,11 @@ class AppNav extends HTMLElement {
       <header class="navbar" id="navbar">
         <a href="/home"><div class="logo">CUISYNC</div></a>
 
-        <!-- Phones: login / profile stays at the top (the page links move to the bottom bar) -->
+        <!-- Login / profile pill: at the far right on desktop; on phones it stays at the top
+             (the page links move to the bottom bar) -->
         <a href="/login" class="top-account-btn" id="top-account-btn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-          <span>LOGIN</span>
+          <span>Log in</span>
         </a>
         
         <button class="hamburger-toggle" id="hamburger-btn" aria-label="Toggle Navigation Menu" aria-controls="nav-menu" aria-expanded="false">
@@ -17,11 +18,11 @@ class AppNav extends HTMLElement {
         </button>
 
         <nav class="nav-links" id="nav-menu">
-          <a href="/home">HOME</a>
-          <a href="/analysis">STATISTICS</a>
-          <a href="/dictionary">DISHES</a>
-          <a href="/faqs">FAQS</a>
-          <a href="/login" class="nav-account" id="nav-account">LOGIN</a>
+          <a href="/home">Home</a>
+          <a href="/analysis">Statistics</a>
+          <a href="/dictionary">Dishes</a>
+          <a href="/faqs">FAQs</a>
+          <a href="/login" class="nav-account" id="nav-account">Log in</a>
         </nav>
       </header>
       <div class="nav-overlay" id="nav-overlay"></div>
@@ -74,15 +75,15 @@ class AppNav extends HTMLElement {
         if (!me || !me.logged_in || !account) return;
         if (topAccount) {
           topAccount.href = '/profile';
-          topAccount.querySelector('span').textContent = 'PROFILE';
+          topAccount.querySelector('span').textContent = 'Profile';
           topAccount.classList.toggle('active', path.startsWith('/profile'));
         }
-        account.textContent = 'PROFILE';
+        account.textContent = 'Profile';
         account.href = '/profile';
         if (path.startsWith('/profile')) account.classList.add('active');
         const out = document.createElement('a');
         out.href = '/logout';
-        out.textContent = 'LOGOUT';
+        out.textContent = 'Log out';
         account.after(out);
       })
       .catch(() => {});
@@ -154,7 +155,7 @@ class AppFooter extends HTMLElement {
               <li><a href="/home">Home</a></li>
               <li><a href="/analysis">Statistics</a></li>
               <li><a href="/dictionary">Dishes</a></li>
-              <li><a href="/faqs">FAQS</a></li>
+              <li><a href="/faqs">FAQs</a></li>
             </ul>
           </div>
 
@@ -178,4 +179,4 @@ class AppFooter extends HTMLElement {
 }
 
 customElements.define('app-nav', AppNav);
-customElements.define('app-footer', AppFooter);
+customElements.define('app-footer', AppFooter);

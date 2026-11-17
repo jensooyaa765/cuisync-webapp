@@ -27,13 +27,13 @@
   <section class="hero">
     <div class="hero-overlay"></div>
     <div class="hero-content">
-      <div class="subtitle">◆ DISCOVER ASIAN CUISINES</div>
+      <div class="subtitle">◆ Discover Asian cuisines</div>
       <h1 class="hero-title">CUISYNC</h1>
       <p class="hero-description">
         AI-Powered Asian Cuisine Similarity based on<br>
         Ingredients and Cooking Processes
       </p>
-      <a href="#search-section" class="btn btn-gold">SEARCH NOW</a>
+      <a href="#search-section" class="btn btn-gold">Search now</a>
     </div>
   </section>
 
@@ -75,9 +75,9 @@
       </p>
 
       <div class="tab-toggle">
-        <button type="button" class="tab-btn active" id="btn-text-tab" onclick="switchTab('text')">SEARCH BY TEXT</button>
-        <button type="button" class="tab-btn" id="btn-tag-tab" onclick="switchTab('tag')">SEARCH BY TAG</button>
-        <button type="button" class="tab-btn" id="btn-image-tab" onclick="switchTab('image')">SEARCH BY IMAGE</button>
+        <button type="button" class="tab-btn active" id="btn-text-tab" onclick="switchTab('text')">Search by text</button>
+        <button type="button" class="tab-btn" id="btn-tag-tab" onclick="switchTab('tag')">Search by tag</button>
+        <button type="button" class="tab-btn" id="btn-image-tab" onclick="switchTab('image')">Search by image</button>
       </div>
 
       <!-- TEXT SEARCH FORM -->
@@ -87,7 +87,7 @@
         <input type="hidden" name="search_mode" value="dish">
 
         <div class="form-group full-width" id="dish-mode-group">
-          <label for="dish-name-input">DISH NAME</label>
+          <label for="dish-name-input">Dish name</label>
           <div class="search-dropdown-wrapper">
             <input 
               type="text" 
@@ -108,33 +108,32 @@
           </div>
         </div>
 
-        <!-- Dish picked from the popup -->
-        <button type="button" id="text-selected-dish" class="selected-dish-card" style="display: none;" aria-label="Change selected dish">
+        <!-- Dish picked from the popup: a preview only (changing it is done in the name box) -->
+        <div id="text-selected-dish" class="selected-dish-card is-static" style="display: none;">
           <div class="selected-dish-info">
-            <span class="selected-dish-label">SELECTED DISH</span>
+            <span class="selected-dish-label">Selected dish</span>
             <strong id="text-selected-name"></strong>
             <span id="text-selected-alt" class="selected-dish-alt-name"></span>
             <span id="text-selected-country" class="selected-dish-country"></span>
-            <span class="selected-dish-change">Click to change</span>
           </div>
           <img id="text-selected-image" class="selected-dish-image" alt="" />
-        </button>
+        </div>
 
         <div class="form-row">
           <!-- Hidden in ingredient mode: the origin comes from the dish picked in the popup -->
           <div class="form-group half-width" id="text-origin-group">
-            <label id="text-origin-label">COUNTRY OF ORIGIN</label>
+            <label id="text-origin-label">Country of origin</label>
             <!-- Filled in from the chosen dish (same as the image search). The hidden select sends the value. -->
             <div id="text-origin-display" class="origin-display is-placeholder"
-                 role="status" aria-live="polite" aria-labelledby="text-origin-label">Country of Origin</div>
+                 role="status" aria-live="polite" aria-labelledby="text-origin-label">Country of origin</div>
             <select id="text-origin" name="origin_country" class="origin-select-hidden" tabindex="-1" aria-hidden="true">
-              <option value="" disabled selected>Country of Origin</option>
+              <option value="" disabled selected>Country of origin</option>
               {% for c in countries %}<option value="{{ c.value }}">{{ c.label }}</option>{% endfor %}
             </select>
           </div>
 
           <div class="form-group half-width" id="text-target-group">
-            <label for="text-target">TARGET COUNTRY</label>
+            <label for="text-target">Target country</label>
             <select id="text-target" name="target_country" required>
               <option value="" disabled selected>Select target country...</option>
               <option value="any">Any country (best match)</option>
@@ -148,7 +147,7 @@
             We'll find the most similar cuisine to the target country<br>
             based on its ingredients and cooking processes
           </p>
-          <button type="submit" class="btn btn-red">SEARCH THE DISH</button>     
+          <button type="submit" class="btn btn-red">Search the dish</button>     
         </div>
       </form>
 
@@ -164,10 +163,10 @@
         <input type="hidden" name="ingredients" id="tag-ingredients">
 
         <div class="search-mode-toggle tag-subtabs" role="tablist" aria-label="Search by">
-          <button type="button" class="search-mode-btn active" data-panel="region" role="tab" aria-selected="true" aria-controls="tag-panel-region">REGION</button>
-          <button type="button" class="search-mode-btn" data-panel="ingredient" role="tab" aria-selected="false" aria-controls="tag-panel-ingredient">INGREDIENT</button>
-          <button type="button" class="search-mode-btn" data-panel="method" role="tab" aria-selected="false" aria-controls="tag-panel-method">COOKING METHOD</button>
-          <button type="button" class="search-mode-btn" data-panel="type" role="tab" aria-selected="false" aria-controls="tag-panel-type">DISH TYPE</button>
+          <button type="button" class="search-mode-btn active" data-panel="region" role="tab" aria-selected="true" aria-controls="tag-panel-region">Region</button>
+          <button type="button" class="search-mode-btn" data-panel="ingredient" role="tab" aria-selected="false" aria-controls="tag-panel-ingredient">Ingredient</button>
+          <button type="button" class="search-mode-btn" data-panel="method" role="tab" aria-selected="false" aria-controls="tag-panel-method">Cooking method</button>
+          <button type="button" class="search-mode-btn" data-panel="type" role="tab" aria-selected="false" aria-controls="tag-panel-type">Dish type</button>
         </div>
 
         <!-- Region tab: regions AND countries of origin (pick a country alone if you only
@@ -175,7 +174,7 @@
         <div class="form-group full-width tag-panel" id="tag-panel-region" data-panel="region" role="tabpanel"
              data-options="{{ home_tag_groups().get('Region', []) | map('first') | list | tojson | forceescape }}"
              data-countries="{{ home_country_options() | tojson | forceescape }}">
-          <label for="tag-entry-region">REGION OR COUNTRY <span class="label-hint">(type to search, press Enter to add)</span></label>
+          <label for="tag-entry-region">Region or country <span class="label-hint">(type to search, press Enter to add)</span></label>
           <div class="search-dropdown-wrapper">
             <div class="ingredient-chip-input tag-chip-input">
               <div class="ingredient-chips" data-chips></div>
@@ -202,7 +201,7 @@
         </div>
         <div class="form-group full-width tag-panel" id="tag-panel-ingredient" data-panel="ingredient" role="tabpanel" hidden
              data-free="1">
-          <label for="tag-entry-ingredient">INGREDIENT <span class="label-hint">(any ingredient in our dataset; press Enter or comma after each one)</span></label>
+          <label for="tag-entry-ingredient">Ingredient <span class="label-hint">(any ingredient in our dataset; press Enter or comma after each one)</span></label>
           <div class="search-dropdown-wrapper">
             <div class="ingredient-chip-input tag-chip-input">
               <div class="ingredient-chips" data-chips></div>
@@ -221,7 +220,7 @@
         </div>
         <div class="form-group full-width tag-panel" id="tag-panel-method" data-panel="method" role="tabpanel" hidden
              data-options="{{ home_tag_groups().get('Cooking method', []) | map('first') | list | tojson | forceescape }}">
-          <label for="tag-entry-method">COOKING METHOD <span class="label-hint">(type to search, press Enter to add)</span></label>
+          <label for="tag-entry-method">Cooking method <span class="label-hint">(type to search, press Enter to add)</span></label>
           <div class="search-dropdown-wrapper">
             <div class="ingredient-chip-input tag-chip-input">
               <div class="ingredient-chips" data-chips></div>
@@ -240,7 +239,7 @@
         </div>
         <div class="form-group full-width tag-panel" id="tag-panel-type" data-panel="type" role="tabpanel" hidden
              data-options="{{ home_tag_groups().get('Dish type', []) | map('first') | list | tojson | forceescape }}">
-          <label for="tag-entry-type">DISH TYPE <span class="label-hint">(type to search, press Enter to add)</span></label>
+          <label for="tag-entry-type">Dish type <span class="label-hint">(type to search, press Enter to add)</span></label>
           <div class="search-dropdown-wrapper">
             <div class="ingredient-chip-input tag-chip-input">
               <div class="ingredient-chips" data-chips></div>
@@ -261,7 +260,7 @@
         <!-- Everything picked in the four sub-tabs -->
         <div class="tag-summary" id="tag-summary">
           <div class="tag-summary-head">
-            <span class="tag-summary-title">YOUR TAGS <span id="tag-summary-count"></span></span>
+            <span class="tag-summary-title">Your tags <span id="tag-summary-count"></span></span>
             <button type="button" class="tag-summary-clear" id="tag-summary-clear" hidden>Clear all</button>
           </div>
           <div class="tag-summary-chips" id="tag-summary-chips"></div>
@@ -270,7 +269,7 @@
 
         <div class="form-row">
           <div class="form-group full-width">
-            <label for="tag-target">TARGET COUNTRY</label>
+            <label for="tag-target">Target country</label>
             <select id="tag-target" name="target_country" required>
               <option value="" disabled selected>Select target country...</option>
               <option value="any">Any country (best match)</option>
@@ -284,7 +283,7 @@
             Pick tags to see every dish that has them, then choose one<br>
             to find its most similar dishes in the target country
           </p>
-          <button type="submit" class="btn btn-red">FIND DISHES</button>
+          <button type="submit" class="btn btn-red">Find dishes</button>
         </div>
       </form>
 
@@ -312,11 +311,11 @@
             <div class="dropzone-actions">
               <button type="button" class="dropzone-btn" id="upload-photo-btn">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                Upload Photo
+                Upload photo
               </button>
               <button type="button" class="dropzone-btn dropzone-btn-camera" id="camera-btn">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                Take a Photo
+                Take a photo
               </button>
             </div>
           </div>
@@ -328,7 +327,7 @@
             <button type="button" id="selected-dish-card" class="selected-dish-card" style="display: none;" aria-label="Change selected dish">
               
               <div class="selected-dish-info">
-                <span class="selected-dish-label">SELECTED DISH</span>
+                <span class="selected-dish-label">Selected dish</span>
                 <strong id="selected-dish-name"></strong>
                 <span id="selected-dish-alt-name" class="selected-dish-alt-name"></span>
                 <span id="selected-dish-country" class="selected-dish-country"></span>
@@ -350,7 +349,7 @@
                 </svg>
               </span>
               <span class="select-dish-prompt-info">
-                <span class="selected-dish-label">NO DISH SELECTED</span>
+                <span class="selected-dish-label">No dish selected</span>
                 <strong>Select dish from the image</strong>
                 <span id="select-dish-prompt-count" class="select-dish-prompt-count"></span>
               </span>
@@ -363,24 +362,24 @@
               <p class="ocr-loading-note" id="ocr-loading-note">Note: Use a clear, readable photo.</p>
             </div>
 
-            <button type="button" class="btn-remove-image" id="remove-img-btn">Remove Photo</button>
+            <button type="button" class="btn-remove-image" id="remove-img-btn">Remove photo</button>
           </div>
         </div>
 
         <div class="form-row">
           <div class="form-group half-width">
-            <label id="img-origin-label">COUNTRY OF ORIGIN</label>
+            <label id="img-origin-label">Country of origin</label>
             <!-- Filled in from the dish in the photo, not a dropdown. The hidden select sends the value. -->
             <div id="img-origin-display" class="origin-display is-placeholder"
-                 role="status" aria-live="polite" aria-labelledby="img-origin-label">Country of Origin</div>
+                 role="status" aria-live="polite" aria-labelledby="img-origin-label">Country of origin</div>
             <select id="img-origin" name="origin_country" class="origin-select-hidden" tabindex="-1" aria-hidden="true">
-              <option value="" disabled selected>Country of Origin</option>
+              <option value="" disabled selected>Country of origin</option>
               {% for c in countries %}<option value="{{ c.value }}">{{ c.label }}</option>{% endfor %}
             </select>
           </div>
 
           <div class="form-group half-width">
-            <label for="img-target">TARGET COUNTRY</label>
+            <label for="img-target">Target country</label>
             <select id="img-target" name="target_country" required>
               <option value="" disabled selected>Select target country...</option>
               <option value="any">Any country (best match)</option>
@@ -396,7 +395,7 @@
             We'll find the most similar cuisine to the target country<br>
             based on its ingredients and cooking processes.
           </p>
-          <button type="submit" class="btn btn-red">SEARCH THE DISH</button>
+          <button type="submit" class="btn btn-red">Search the dish</button>
         </div>
       </form>
 
@@ -456,7 +455,7 @@
       <div class="modal-icon">!</div>
       <h3 id="modal-title-text" class="modal-title">We Can't Find Your Dish</h3>
       <p id="modal-desc-text" class="modal-desc"></p>
-      <button type="button" class="btn btn-red modal-ok-btn" onclick="closeErrorModal()">TRY AGAIN</button>
+      <button type="button" class="btn btn-red modal-ok-btn" onclick="closeErrorModal()">Try again</button>
     </div>
   </div>
 
@@ -839,13 +838,13 @@
       <h2 class="sim-warning-title" id="simWarningTitle">Low Similarity Warning</h2>
       <div class="sim-warning-score" aria-hidden="true">
         <span class="sim-warning-score-value" id="simWarningScore"></span>
-        <span class="sim-warning-score-label">SIMILAR</span>
+        <span class="sim-warning-score-label">Similar</span>
       </div>
       <p class="sim-warning-message" id="simWarningMessage"></p>
       <p class="sim-warning-note">Do you still want to see the closest dish we found?</p>
       <div class="sim-warning-actions">
         <button type="button" class="sim-warning-btn secondary" id="simWarningNo">NO</button>
-        <button type="button" class="sim-warning-btn primary" id="simWarningYes">VIEW RESULTS ANYWAY</button>
+        <button type="button" class="sim-warning-btn primary" id="simWarningYes">View results anyway</button>
       </div>
     </div>
   </div>

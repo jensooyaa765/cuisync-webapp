@@ -45,11 +45,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const hasCountry = Boolean(originSelect.value && option);
 
     if (isScanning) {
-      originDisplay.textContent = 'Finding Origin Country';
+      originDisplay.textContent = 'Finding origin country';
     } else if (hasCountry) {
       originDisplay.textContent = option.textContent;
     } else {
-      originDisplay.textContent = 'Country of Origin';
+      originDisplay.textContent = 'Country of origin';
     }
 
     originDisplay.classList.toggle('is-placeholder', isScanning || !hasCountry);
@@ -149,6 +149,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     selectedDishCard.style.display = showCard ? 'flex' : 'none';
     selectedDishCard.querySelector('.selected-dish-change').style.display = canChange ? 'inline' : 'none';
+    // Not clickable -> no hover look, not in the Tab order
+    selectedDishCard.classList.toggle('is-static', !canChange);
+    selectedDishCard.tabIndex = canChange ? 0 : -1;
     selectedDishCard.setAttribute(
       'aria-label',
       canChange ? 'Change selected dish' : 'Selected dish'
@@ -404,7 +407,7 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
         <div class="camera-fallback" hidden>
           <button type="button" class="dropzone-btn dropzone-btn-camera camera-app-btn">Open Camera App</button>
-          <button type="button" class="dropzone-btn camera-upload-btn">Upload Photo</button>
+          <button type="button" class="dropzone-btn camera-upload-btn">Upload photo</button>
         </div>
       </div>`;
     document.body.appendChild(cameraModal);
@@ -587,4 +590,4 @@ document.addEventListener('DOMContentLoaded', () => {
       showErrorModal('Choose a Dish', 'Select one of the detected menu dishes before starting the comparison.');
     }
   });
-});
+});

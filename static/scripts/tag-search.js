@@ -143,7 +143,7 @@ document.addEventListener('DOMContentLoaded', () => {
     summaryEmpty.hidden = total > 0;
     summaryClear.hidden = total === 0;
     summaryCount.textContent = total ? `(${total})` : '';
-    submitButton.textContent = pendingDish ? 'SEARCH THE DISH' : 'FIND DISHES';
+    submitButton.textContent = pendingDish ? 'Search the dish' : 'Find dishes';
   }
 
   Object.values(panels).forEach((p) => {
@@ -342,7 +342,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     submitButton.disabled = true;
-    submitButton.textContent = 'SEARCHING…';
+    submitButton.textContent = 'Searching…';
     try {
       const url = `/api/find-dishes?mode=tags&q=${encodeURIComponent(tags.join('|'))}`
         + (picks.ingredient.length ? `&ing=${encodeURIComponent(picks.ingredient.join(', '))}` : '')

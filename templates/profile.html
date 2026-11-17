@@ -1,13 +1,13 @@
 {% extends "panel_base.html" %}
 {% block title %}Profile{% endblock %}
-{% block eyebrow %}YOUR PROFILE{% endblock %}
+{% block eyebrow %}Your profile{% endblock %}
 {% block heading %}{{ user.name }}{% endblock %}
 {% block lead %}@{{ user.username }}{% if user.cooking_role %} &middot; {{ user.cooking_role }}{% endif %}{% if user.home_country %} &middot; {{ user.home_country }}{% endif %}{% endblock %}
 {% block content %}
 <nav class="panel-tabs">
-  <a href="#history">SEARCH HISTORY</a>
-  <a href="#profile">PROFILE</a>
-  <a href="#account">ACCOUNT</a>
+  <a href="#history">Search history</a>
+  <a href="#profile">Profile</a>
+  <a href="#account">Account</a>
 </nav>
 
 <!-- SEARCH HISTORY (Oab 3, Galang 5) -->
@@ -16,7 +16,7 @@
     <h2>Search history</h2>
     {% if history %}
     <form method="POST" action="{{ url_for('clear_history') }}" onsubmit="return confirm('Clear all of your search history?')">
-      <button class="btn-panel btn-panel-ghost" type="submit">CLEAR ALL</button>
+      <button class="btn-panel btn-panel-ghost" type="submit">Clear all</button>
     </form>
     {% endif %}
   </div>
@@ -46,7 +46,7 @@
             {% else %}{{ h.result_title }}{% endif %}
           </td>
           <td class="row-actions">
-            <a class="btn-panel btn-panel-small" href="{{ url_for('open_history', entry_id=h.id) }}">OPEN AGAIN</a>
+            <a class="btn-panel btn-panel-small" href="{{ url_for('open_history', entry_id=h.id) }}">Open again</a>
             <form method="POST" action="{{ url_for('delete_history', entry_id=h.id) }}">
               <button class="icon-btn" type="submit" aria-label="Remove from history" title="Remove">&times;</button>
             </form>
@@ -96,7 +96,7 @@
         {% endfor %}
       </div>
     </fieldset>
-    <div class="span-2"><button class="btn-panel btn-panel-red" type="submit">SAVE PROFILE</button></div>
+    <div class="span-2"><button class="btn-panel btn-panel-red" type="submit">Save profile</button></div>
   </form>
 </section>
 
@@ -107,8 +107,8 @@
   <form method="POST" action="{{ url_for('change_password') }}" class="panel-form two-col">
     <label>Current password <input type="password" name="old" required autocomplete="current-password"></label>
     <label>New password <input type="password" name="new" required minlength="6" autocomplete="new-password"></label>
-    <div class="span-2"><button class="btn-panel" type="submit">CHANGE PASSWORD</button>
-      <a class="btn-panel btn-panel-ghost" href="{{ url_for('logout') }}">LOG OUT</a></div>
+    <div class="span-2"><button class="btn-panel" type="submit">Change password</button>
+      <a class="btn-panel btn-panel-ghost" href="{{ url_for('logout') }}">Log out</a></div>
   </form>
 </section>
 {% endblock %}
